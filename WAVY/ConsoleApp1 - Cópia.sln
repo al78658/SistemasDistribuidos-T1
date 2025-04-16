@@ -1,0 +1,37 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.13.35818.85
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WAVY", "WAVY.csproj", "{EFCC7415-A9C1-4BBE-92B1-0F8EEE6AAA7B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AGREGADOR", "..\AGREGADOR\AGREGADOR.csproj", "{E24B1A67-E292-4ACB-92B8-38B6361A7374}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SERVIDOR TCP", "..\SERVIDOR TCP\SERVIDOR TCP.csproj", "{876B9501-0155-4634-856A-936D5DC2AA75}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{EFCC7415-A9C1-4BBE-92B1-0F8EEE6AAA7B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EFCC7415-A9C1-4BBE-92B1-0F8EEE6AAA7B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EFCC7415-A9C1-4BBE-92B1-0F8EEE6AAA7B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EFCC7415-A9C1-4BBE-92B1-0F8EEE6AAA7B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E24B1A67-E292-4ACB-92B8-38B6361A7374}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E24B1A67-E292-4ACB-92B8-38B6361A7374}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E24B1A67-E292-4ACB-92B8-38B6361A7374}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E24B1A67-E292-4ACB-92B8-38B6361A7374}.Release|Any CPU.Build.0 = Release|Any CPU
+		{876B9501-0155-4634-856A-936D5DC2AA75}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{876B9501-0155-4634-856A-936D5DC2AA75}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{876B9501-0155-4634-856A-936D5DC2AA75}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{876B9501-0155-4634-856A-936D5DC2AA75}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {7C2AF90F-C68C-4C65-8058-D840E0B79035}
+	EndGlobalSection
+EndGlobal
