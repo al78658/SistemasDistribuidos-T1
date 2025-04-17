@@ -228,8 +228,6 @@ class Agregador
                             VolumeDadosEnviar = int.Parse(parts[2]),
                             ServidorAssociado = parts[3]
                         };
-
-                        Console.WriteLine($"[INFO] Configuração recarregada para WAVY {wavyId}: PreProcessamento={parts[1]}");
                         break;
                     }
                 }
@@ -281,7 +279,6 @@ class Agregador
 
     static string PreProcessar(string data, string tipo)
     {
-        Console.WriteLine($"[INFO] Aplicando pré-processamento: {tipo}");
         return tipo switch
         {
             "trim" => data.Trim(),
