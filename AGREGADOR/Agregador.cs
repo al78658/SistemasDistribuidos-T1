@@ -143,6 +143,9 @@ class Agregador
                         bufferWavy[wavyId] = new List<string>();
                     }
 
+                    // Recarregar configurações do arquivo antes de processar os dados
+                    RecarregarConfiguracaoWavy(wavyId);
+
                     RecarregarStatusWavy(); // <-- Atualiza estado a partir do ficheiro
 
                     lock (statusLock)
@@ -180,6 +183,7 @@ class Agregador
                     break;
 
 
+
                 case "MAINTENANCE":
                     string maintenanceId = json.GetProperty("id").GetString().ToLower();
                     AtualizarEstadoWavy(maintenanceId, "manutencao");
@@ -204,6 +208,34 @@ class Agregador
         }
     }
 
+    static void RecarregarConfiguracaoWavy(string wavyId)
+    {
+        lock (configLock)
+        {
+            if (File.Exists("config_wavy.txt"))
+            {
+                foreach (var line in File.ReadLines("config_wavy.txt"))
+                {
+                    var parts = line.Split(':');
+                    if (parts.Length < 4) continue;
+
+                    string id = parts[0].ToLower();
+                    if (id == wavyId)
+                    {
+                        wavyConfigs[id] = new WavyConfig
+                        {
+                            PreProcessamento = parts[1],
+                            VolumeDadosEnviar = int.Parse(parts[2]),
+                            ServidorAssociado = parts[3]
+                        };
+
+                        Console.WriteLine($"[INFO] Configuração recarregada para WAVY {wavyId}: PreProcessamento={parts[1]}");
+                        break;
+                    }
+                }
+            }
+        }
+    }
     static void RecarregarStatusWavy()
     {
         lock (statusLock)
@@ -249,6 +281,7 @@ class Agregador
 
     static string PreProcessar(string data, string tipo)
     {
+        Console.WriteLine($"[INFO] Aplicando pré-processamento: {tipo}");
         return tipo switch
         {
             "trim" => data.Trim(),
@@ -258,6 +291,7 @@ class Agregador
             _ => data
         };
     }
+
 
     static string RemoverVirgulas(string linhaCsv)
     {
