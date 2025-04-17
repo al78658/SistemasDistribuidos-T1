@@ -75,28 +75,7 @@ class Agregador
             }
         }
 
-        if (File.Exists("status.txt"))
-        {
-            foreach (var line in File.ReadLines("status.txt"))
-            {
-                var parts = line.Split(':');
-                if (parts.Length < 4) continue;
-
-                string wavyId = parts[0].ToLower();
-                var dataTypes = parts[2].Trim('[', ']').Split(',', StringSplitOptions.RemoveEmptyEntries);
-                DateTime.TryParseExact(parts[3], "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime lastSync);
-
-                wavyStatus[wavyId] = new WavyStatus
-                {
-                    Status = parts[1],
-                    DataTypes = new List<string>(dataTypes),
-                    LastSync = lastSync
-                };
-
-                if (!bufferWavy.ContainsKey(wavyId))
-                    bufferWavy[wavyId] = new List<string>();
-            }
-        }
+        RecarregarStatusWavy();
     }
 
     static void HandleClient(TcpClient client, string serverIp, int serverPort)
@@ -161,16 +140,21 @@ class Agregador
                         return;
                     }
 
-                    if (wavyStatus[wavyId].Status == "desativada")
-                    {
-                        SendResponse(stream, new { type = "NOTIFICACAO", message = "WAVY desativada. Encerrando envio." });
-                        return;
-                    }
+                    RecarregarStatusWavy(); // <-- Atualiza estado a partir do ficheiro
 
-                    if (wavyStatus[wavyId].Status == "manutencao")
+                    lock (statusLock)
                     {
-                        SendResponse(stream, new { type = "NOTIFICACAO", message = "WAVY em manutencao. Dados descartados." });
-                        return;
+                        if (wavyStatus[wavyId].Status == "desativada")
+                        {
+                            SendResponse(stream, new { type = "NOTIFICACAO", message = "WAVY desativada. Encerrando envio." });
+                            return;
+                        }
+
+                        if (wavyStatus[wavyId].Status == "manutencao")
+                        {
+                            SendResponse(stream, new { type = "NOTIFICACAO", message = "WAVY em manutencao. Dados descartados." });
+                            return;
+                        }
                     }
 
                     string preproc = wavyConfigs.ContainsKey(wavyId) ? wavyConfigs[wavyId].PreProcessamento : "nenhum";
@@ -216,6 +200,35 @@ class Agregador
         }
     }
 
+    static void RecarregarStatusWavy()
+    {
+        lock (statusLock)
+        {
+            if (File.Exists("status.txt"))
+            {
+                foreach (var line in File.ReadLines("status.txt"))
+                {
+                    var parts = line.Split(':');
+                    if (parts.Length < 4) continue;
+
+                    string wavyId = parts[0].ToLower();
+                    var dataTypes = parts[2].Trim('[', ']').Split(',', StringSplitOptions.RemoveEmptyEntries);
+                    DateTime.TryParseExact(parts[3], "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime lastSync);
+
+                    wavyStatus[wavyId] = new WavyStatus
+                    {
+                        Status = parts[1],
+                        DataTypes = new List<string>(dataTypes),
+                        LastSync = lastSync
+                    };
+
+                    if (!bufferWavy.ContainsKey(wavyId))
+                        bufferWavy[wavyId] = new List<string>();
+                }
+            }
+        }
+    }
+
     static void SendResponse(NetworkStream stream, object response)
     {
         string jsonResponse = JsonSerializer.Serialize(response);
@@ -246,37 +259,22 @@ class Agregador
         var partes = linhaCsv.Split('|');
         for (int i = 0; i < partes.Length; i++)
         {
-            // Divide os valores por vírgulas
             var valores = partes[i].Split(',');
 
-            // Verifica se há pelo menos dois valores (timestamp + medidas)
             if (valores.Length > 1)
             {
-                // O primeiro valor é o timestamp
                 string timestamp = valores[0];
-
-                // Os valores restantes são as medidas
                 string[] measurements = valores[1..];
 
-                // Substitui as vírgulas por ponto e vírgula nas medidas
                 for (int j = 0; j < measurements.Length; j++)
-                {
                     measurements[j] = measurements[j].Replace(',', ';');
-                }
 
-                // Cria uma nova parte com um espaço após o timestamp
                 string novaParte = timestamp + " " + string.Join(";", measurements);
-
-                // Atualiza a parte processada
                 partes[i] = novaParte;
             }
         }
-
-        // Reconstroi a linha com o delimitador '|', se aplicável
         return string.Join(" | ", partes);
     }
-
-
 
     static string ValidarECorrigir(string linhaCsv)
     {
@@ -289,11 +287,8 @@ class Agregador
             {
                 campos[i] = campos[i].Trim();
 
-                // Tentar converter o campo para double e substituir valores negativos por 0
                 if (double.TryParse(campos[i], NumberStyles.Any, CultureInfo.InvariantCulture, out double valor) && valor < 0)
-                {
                     campos[i] = "0";
-                }
             }
 
             return string.Join(",", campos);
@@ -304,8 +299,6 @@ class Agregador
         }
     }
 
-
-
     static void SendBufferedData(string ip, int port, string id)
     {
         if (bufferWavy.ContainsKey(id) && bufferWavy[id].Count > 0)
@@ -313,14 +306,12 @@ class Agregador
             string conteudo = string.Join(" | ", bufferWavy[id]);
             bufferWavy[id].Clear();
 
-            // Aplicar pré-processamento se configurado
             if (wavyConfigs.ContainsKey(id))
             {
                 string preproc = wavyConfigs[id].PreProcessamento;
                 conteudo = PreProcessar(conteudo, preproc);
             }
 
-            // Verificar se o conteúdo é nulo após o pré-processamento
             if (conteudo == null)
             {
                 Console.WriteLine($"[ERRO] Conteúdo inválido após pré-processamento para {id}");
@@ -345,7 +336,6 @@ class Agregador
             }
         }
     }
-
 
     static void AtualizarEstadoWavy(string wavyId, string novoStatus)
     {

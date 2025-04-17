@@ -228,6 +228,9 @@ class Wavy
         }
     }
 
+
+    // ... (restante código sem alterações acima do StartDataTransmission)
+
     static void StartDataTransmission(string aggregatorIp, int aggregatorPort, string wavyId, string csvFile, string progressFile)
     {
         string mutexKey = $"{aggregatorIp}:{aggregatorPort}";
@@ -292,9 +295,12 @@ class Wavy
 
                     if (resposta.Contains("WAVY desativada"))
                     {
-                        Console.WriteLine($"[WAVY {wavyId}] WAVY desativada pelo agregador. A interromper.");
-                        break;
+                        Console.WriteLine($"[WAVY {wavyId}] O agregador respondeu que está desativada, mas ignorando essa instrução. Aguardando reativação...");
+                        Thread.Sleep(2000);
+                        i--; // Repetir esta linha depois
+                        continue;
                     }
+
                     else if (resposta.Contains("WAVY em manutencao"))
                     {
                         Console.WriteLine($"[WAVY {wavyId}] WAVY em manutenção segundo agregador. A aguardar...");
@@ -306,6 +312,12 @@ class Wavy
                     {
                         Console.WriteLine($"[WAVY {wavyId}] Dados recebidos com sucesso.");
                         SaveProgress(progressFile, i);
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[WAVY {wavyId}] Resposta inesperada: {resposta}. Vai tentar novamente esta linha.");
+                        i--; // Repetir esta linha depois
+                        Thread.Sleep(2000);
                     }
                 }
                 catch (Exception ex)
@@ -340,9 +352,11 @@ class Wavy
             globalMutex.ReleaseMutex();
         }
 
-        File.Delete(progressFile);
+        // ❌ REMOVIDO: File.Delete(progressFile);
         Console.WriteLine($"[WAVY {wavyId}] Transmissão finalizada.");
     }
+
+
 
     static string ObterEstadoAtualDaWavy(string wavyId)
     {

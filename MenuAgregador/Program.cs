@@ -157,26 +157,56 @@ class Launcher
         wavyId = wavyId.ToLower();
 
         List<string> tiposOperacao = new List<string> { "Hs", "Hmax", "Tz", "Tp", "Peak Direction", "SST" };
-        List<string> tipos = novoStatus == "operacao" ? tiposOperacao : new List<string>();
+        List<string> tipos;
 
-        if (wavyStatus.ContainsKey(wavyId))
+        lock (statusLock)
         {
-            wavyStatus[wavyId].Status = novoStatus;
-            wavyStatus[wavyId].LastSync = DateTime.Now;
-            wavyStatus[wavyId].DataTypes = tipos;
-        }
-        else
-        {
-            wavyStatus[wavyId] = new WavyStatus
+            // Se for para operação, define os tipos normalmente
+            if (novoStatus == "operacao")
             {
-                Status = novoStatus,
-                DataTypes = tipos,
-                LastSync = DateTime.Now
-            };
+                tipos = tiposOperacao;
+            }
+            // Se for para manutenção, mantém os tipos anteriores
+            else if (novoStatus == "manutencao" && wavyStatus.ContainsKey(wavyId))
+            {
+                tipos = new List<string>(wavyStatus[wavyId].DataTypes);
+            }
+            // Para outros estados (ex: associada, desativada), limpa os tipos
+            else
+            {
+                tipos = new List<string>();
+            }
+
+            if (novoStatus == "operacao" && tipos.Count == 0)
+            {
+                Console.WriteLine("Aviso: Nenhum tipo de dado definido para 'operacao'. Abortando alteração de estado.");
+                return;
+            }
+
+            Console.WriteLine($"Alterando estado da WAVY '{wavyId}' para '{novoStatus}', tipos de dados: [{string.Join(", ", tipos)}]");
+
+            if (wavyStatus.ContainsKey(wavyId))
+            {
+                wavyStatus[wavyId].Status = novoStatus;
+                wavyStatus[wavyId].LastSync = DateTime.Now;
+                wavyStatus[wavyId].DataTypes = tipos;
+            }
+            else
+            {
+                wavyStatus[wavyId] = new WavyStatus
+                {
+                    Status = novoStatus,
+                    DataTypes = tipos,
+                    LastSync = DateTime.Now
+                };
+            }
         }
 
         AtualizarStatusTxt(wavyId, novoStatus);
     }
+
+
+
 
 
     static void AtualizarStatusTxt(string wavyId, string novoStatus)
@@ -212,6 +242,7 @@ class Launcher
 
         Console.WriteLine($"Estado da WAVY {wavyId} ({novoStatus}) atualizado no ficheiro status.txt");
     }
+
 
     static void AlterarConfigWavy()
     {
