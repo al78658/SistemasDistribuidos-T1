@@ -9,3 +9,8 @@ wavy08:nenhum:5:127.0.0.1
 wavy09:nenhum:5:127.0.0.1
 wavy10:nenhum:5:127.0.0.1
 wavy11:nenhum:5:127.0.0.1
+wavy12:remover_virgulas:5:127.0.0.1
+wavy13:nenhum:5:127.0.0.1
+wavy14:nenhum:5:127.0.0.1
+wavy15:nenhum:5:127.0.0.1
+wavy16:remover_virgulas:5:127.0.0.1

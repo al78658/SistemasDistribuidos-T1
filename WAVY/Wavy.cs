@@ -229,7 +229,6 @@ class Wavy
     }
 
 
-    // ... (restante código sem alterações acima do StartDataTransmission)
 
     static void StartDataTransmission(string aggregatorIp, int aggregatorPort, string wavyId, string csvFile, string progressFile)
     {
@@ -352,7 +351,6 @@ class Wavy
             globalMutex.ReleaseMutex();
         }
 
-        // ❌ REMOVIDO: File.Delete(progressFile);
         Console.WriteLine($"[WAVY {wavyId}] Transmissão finalizada.");
     }
 

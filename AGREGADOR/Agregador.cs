@@ -122,6 +122,9 @@ class Agregador
                         AtualizarConfigWavy(id);
                     }
 
+                    // Recarregar o estado da WAVY após o registro
+                    RecarregarStatusWavy();
+
                     SendResponse(stream, new { type = "ACK", message = $"ID {id} registado." });
                     Thread.Sleep(1000);
 
@@ -134,10 +137,10 @@ class Agregador
                     string wavyId = json.GetProperty("id").GetString().ToLower();
                     string conteudo = json.GetProperty("conteudo").GetString();
 
+                    // Garantir que o buffer exista
                     if (!bufferWavy.ContainsKey(wavyId))
                     {
-                        SendResponse(stream, new { type = "NOTIFICACAO", message = "ID nao registado." });
-                        return;
+                        bufferWavy[wavyId] = new List<string>();
                     }
 
                     RecarregarStatusWavy(); // <-- Atualiza estado a partir do ficheiro
@@ -175,6 +178,7 @@ class Agregador
                         SendBufferedData(serverIp, serverPort, wavyId);
 
                     break;
+
 
                 case "MAINTENANCE":
                     string maintenanceId = json.GetProperty("id").GetString().ToLower();
@@ -227,6 +231,7 @@ class Agregador
                 }
             }
         }
+
     }
 
     static void SendResponse(NetworkStream stream, object response)
@@ -384,9 +389,13 @@ class Agregador
                 linhas.Add(linha);
 
             File.WriteAllLines("status.txt", linhas);
+
+            // Recarregar o estado em memória após atualizar o arquivo
+            RecarregarStatusWavy();
         }
         Console.WriteLine($"Estado da WAVY {wavyId} ({novoStatus}) atualizado no ficheiro status.txt");
     }
+
 
     static void AtualizarConfigWavy(string wavyId)
     {
