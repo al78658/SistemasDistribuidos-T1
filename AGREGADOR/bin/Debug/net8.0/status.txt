@@ -1,4 +1,4 @@
-wavy01:associada:[]:2025-04-17 21:22:55
+wavy01:operacao:[Hs,Hmax,Tz,Tp,Peak Direction,SST]:2025-04-17 23:08:08
 wavy02:operacao:[Hs,Hmax,Tz,Tp,Peak Direction,SST]:2025-04-17 18:43:20
 wavy03:operacao:[Hs,Hmax,Tz,Tp,Peak Direction,SST]:2025-04-17 18:43:29
 wavy04:desativada:[Hs,Hmax,Tz,Tp,Peak Direction,SST]:2025-04-17 17:03:28
