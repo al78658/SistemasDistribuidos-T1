@@ -43,9 +43,10 @@ class Servidor
 
     static async void ligarRpc()
     {
-        var httpHandler = new HttpClientHandler
+        var httpHandler = new SocketsHttpHandler
         {
-            ServerCertificateCustomValidationCallback = (HttpRequestMessage, cert, chain, sslPolicyErrors) => true
+            EnableMultipleHttp2Connections = true, // Garante suporte a múltiplas conexões HTTP/2
+            SslOptions = { RemoteCertificateValidationCallback = (sender, cert, chain, errors) => true } // Aceita qualquer certificado
         };
 
         var grpcChannelOptions = new GrpcChannelOptions
@@ -67,9 +68,6 @@ class Servidor
         {
             Console.WriteLine("Erro ao conectar ao servidor gRPC: " + ex.Message);
         }
-
-        Console.WriteLine("Press any key to exit...");
-        Console.ReadKey();
     }
     static void ListenForClients(TcpListener listener, string logFile, Mutex mutex)
     {

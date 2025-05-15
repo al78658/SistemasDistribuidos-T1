@@ -2,6 +2,15 @@ using AnalysisService.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Configurar Kestrel para HTTP/2 explícito
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.ListenAnyIP(7275, listenOptions =>
+    {
+        listenOptions.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http2;
+    });
+});
+
 // Add services to the container.
 builder.Services.AddGrpc();
 
