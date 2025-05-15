@@ -31,7 +31,6 @@ class Servidor
         Console.WriteLine("SERVIDOR 1 a escutar na porta 6000...");
         Console.WriteLine("SERVIDOR 2 a escutar na porta 6001...");
 
-        ligarRpc();
 
         _ = System.Threading.Tasks.Task.Run(() => ListenForClients(listener1, serverLogFile1, ficheiroMutex1));
         _ = System.Threading.Tasks.Task.Run(() => ListenForClients(listener2, serverLogFile2, ficheiroMutex2));
@@ -71,6 +70,8 @@ class Servidor
     }
     static void ListenForClients(TcpListener listener, string logFile, Mutex mutex)
     {
+        ligarRpc();
+
         while (true)
         {
             TcpClient client = listener.AcceptTcpClient();
