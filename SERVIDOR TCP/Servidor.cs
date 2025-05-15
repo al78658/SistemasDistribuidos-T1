@@ -1,10 +1,14 @@
-﻿using System;
+﻿using Grpc.Net.Client;
+using Grpc.Core;
+using System;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
+using System.Threading.Tasks;
+using SERVIDOR_TCP;
 
 class Servidor
 {
@@ -27,13 +31,46 @@ class Servidor
         Console.WriteLine("SERVIDOR 1 a escutar na porta 6000...");
         Console.WriteLine("SERVIDOR 2 a escutar na porta 6001...");
 
+        ligarRpc();
+
         _ = System.Threading.Tasks.Task.Run(() => ListenForClients(listener1, serverLogFile1, ficheiroMutex1));
         _ = System.Threading.Tasks.Task.Run(() => ListenForClients(listener2, serverLogFile2, ficheiroMutex2));
 
         // Manter o programa em execução
         Console.ReadLine();
+
     }
 
+    static async void ligarRpc()
+    {
+        var httpHandler = new HttpClientHandler
+        {
+            ServerCertificateCustomValidationCallback = (HttpRequestMessage, cert, chain, sslPolicyErrors) => true
+        };
+
+        var grpcChannelOptions = new GrpcChannelOptions
+        {
+            HttpHandler = httpHandler,
+            Credentials = ChannelCredentials.Insecure // Força o uso de HTTP/2 sem SSL para desenvolvimento
+        };
+
+        using var channel = GrpcChannel.ForAddress("http://localhost:7275", grpcChannelOptions);
+        var client = new SERVIDOR_TCP.Greeter.GreeterClient(channel);
+
+        try
+        {
+            var reply = await client.SayHelloAsync(
+                              new HelloRequest { Name = "SERVIDOR_TCP" });
+            Console.WriteLine("Greeting: " + reply.Message);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("Erro ao conectar ao servidor gRPC: " + ex.Message);
+        }
+
+        Console.WriteLine("Press any key to exit...");
+        Console.ReadKey();
+    }
     static void ListenForClients(TcpListener listener, string logFile, Mutex mutex)
     {
         while (true)

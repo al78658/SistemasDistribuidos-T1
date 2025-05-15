@@ -8,6 +8,11 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Net.Http;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
+using Grpc.Net.Client;
+using AGREGADOR;
 
 class Agregador
 {
@@ -29,11 +34,12 @@ class Agregador
 
         string serverIp = "127.0.0.1";
 
-        IniciarAgregador(5001, serverIp, 6000);
-        IniciarAgregador(5002, serverIp, 6000);
-        IniciarAgregador(5003, serverIp, 6001);
+        // Alterando as portas para conectar ao AnalysisService
+        IniciarAgregador(7001, serverIp, 8000);
+        IniciarAgregador(7002, serverIp, 8000);
+        IniciarAgregador(7003, serverIp, 8001);
 
-        Console.WriteLine("AGREGADOR iniciado e a escutar nas portas 5001, 5002 e 5003.");
+        Console.WriteLine("AGREGADOR iniciado e a escutar nas portas 7001, 7002 e 7003.");
         Console.WriteLine("Pressiona Ctrl+C para terminar.");
 
         while (true)
@@ -54,8 +60,28 @@ class Agregador
                 Task.Run(() => HandleClient(client, serverIp, serverPort));
             }
         });
+        IniciarRcp();
     }
 
+    static async void IniciarRcp()
+    {
+        var httpHandler = new HttpClientHandler
+        {
+            ServerCertificateCustomValidationCallback = (HttpRequestMessage, cert, chain, sslPolicyErrors) => true
+        };
+
+        using var channel = GrpcChannel.ForAddress("https://localhost:7177", new GrpcChannelOptions
+        {
+            HttpHandler = httpHandler
+        });
+
+        var client = new AGREGADOR.Greeter.GreeterClient(channel);
+        var reply = await client.SayHelloAsync(
+                          new HelloRequest { Name = "AGREGADOR" });
+        Console.WriteLine("Greeting: " + reply.Message);
+        Console.WriteLine("Press any key to exit...");
+        Console.ReadKey();
+    }
     static void LoadConfigurations()
     {
         if (File.Exists("config_wavy.txt"))
