@@ -12,6 +12,7 @@ using SERVIDOR_TCP;
 
 class Servidor
 {
+
     static readonly Mutex ficheiroMutex1 = new();
     static readonly Mutex ficheiroMutex2 = new();
     static string serverLogFile1 = "dados_servidor1.txt";
