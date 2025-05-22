@@ -20,13 +20,9 @@
     <None Update="Protos\greet.proto">
       <GrpcServices>Server</GrpcServices>
     </None>
-    <None Update="Protos\preprocessing.proto">
-      <GrpcServices>Client</GrpcServices>
-    </None>
   </ItemGroup>
-
-  <ItemGroup>
-    <Protobuf Include="Protos\greet.proto" GrpcServices="Client" />
-    <Protobuf Include="Protos\preprocessing.proto" GrpcServices="Client" />
-  </ItemGroup>
+	
+	<ItemGroup>
+		<Protobuf Include="Protos\greet.proto" GrpcServices="Client" />
+	</ItemGroup>
 </Project>

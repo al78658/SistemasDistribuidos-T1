@@ -247,7 +247,7 @@ class Wavy
 
         string[] lines = File.ReadAllLines(csvFile);
 
-        for (int i = Math.Max(lastProcessedLine + 1, 1); i < lines.Length; i++)
+        for (int i = lastProcessedLine + 1; i < lines.Length; i++)
         {
             string estadoAtual = ObterEstadoAtualDaWavy(wavyId);
 

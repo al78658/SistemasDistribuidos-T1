@@ -34,10 +34,10 @@ class Agregador
 
         string serverIp = "127.0.0.1";
 
-        // Corrigindo as portas para conectar ao Servidor TCP correto
-        IniciarAgregador(7001, serverIp, 6000);
-        IniciarAgregador(7002, serverIp, 6000);
-        IniciarAgregador(7003, serverIp, 6001);
+        // Alterando as portas para conectar ao AnalysisService
+        IniciarAgregador(7001, serverIp, 8000);
+        IniciarAgregador(7002, serverIp, 8000);
+        IniciarAgregador(7003, serverIp, 8001);
 
         Console.WriteLine("AGREGADOR iniciado e a escutar nas portas 7001, 7002 e 7003.");
         Console.WriteLine("Pressiona Ctrl+C para terminar.");
@@ -368,38 +368,23 @@ class Agregador
             string conteudo = string.Join(" | ", bufferWavy[id]);
             bufferWavy[id].Clear();
 
-            // Chamada gRPC para pré-processamento remoto
-            string processedData = null;
-            try
+            if (wavyConfigs.ContainsKey(id))
             {
-                var httpHandler = new HttpClientHandler
-                {
-                    ServerCertificateCustomValidationCallback = (message, cert, chain, errors) => true
-                };
-                using var channel = Grpc.Net.Client.GrpcChannel.ForAddress("https://localhost:7177", new Grpc.Net.Client.GrpcChannelOptions { HttpHandler = httpHandler });
-                var grpcClient = new PreProcessingService.Protos.PreProcessing.PreProcessingClient(channel);
-                var preprocType = wavyConfigs.ContainsKey(id) ? wavyConfigs[id].PreProcessamento : "nenhum";
-                var grpcRequest = new PreProcessingService.Protos.PreProcessRequest { WavyId = id, RawData = conteudo };
-                var grpcResponse = grpcClient.PreProcess(grpcRequest);
-                processedData = grpcResponse.ProcessedData;
+                string preproc = wavyConfigs[id].PreProcessamento;
+                conteudo = PreProcessar(conteudo, preproc);
             }
-            catch (Exception ex)
+
+            if (conteudo == null)
             {
-                Console.WriteLine($"[ERRO] Falha ao chamar o serviço de pré-processamento gRPC: {ex.Message}");
+                Console.WriteLine($"[ERRO] Conteúdo inválido após pré-processamento para {id}");
                 return;
             }
 
-            if (string.IsNullOrWhiteSpace(processedData))
-            {
-                Console.WriteLine($"[ERRO] Conteúdo inválido após pré-processamento remoto para {id}");
-                return;
-            }
-
-            Console.WriteLine($"[ENVIANDO PARA SERVIDOR] {id}: {processedData}");
+            Console.WriteLine($"[ENVIANDO PARA SERVIDOR] {id}: {conteudo}");
 
             try
             {
-                var payload = new { type = "FORWARD", data = new { id, conteudo = processedData } };
+                var payload = new { type = "FORWARD", data = new { id, conteudo } };
                 string json = JsonSerializer.Serialize(payload);
                 byte[] buffer = Encoding.UTF8.GetBytes(json);
 
