@@ -1,4 +1,4 @@
-﻿using Grpc.Net.Client;
+﻿﻿using Grpc.Net.Client;
 using Grpc.Core;
 using System;
 using System.IO;
@@ -84,10 +84,21 @@ class Servidor
         try
         {
             NetworkStream stream = client.GetStream();
-            byte[] buffer = new byte[2048];
-            int bytesRead = stream.Read(buffer, 0, buffer.Length);
-            string message = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-
+            
+            // Increase buffer size to handle larger JSON payloads
+            byte[] buffer = new byte[8192]; // Increased from 2048 to 8192
+            
+            // Read all available data from the stream
+            using MemoryStream ms = new MemoryStream();
+            int bytesRead;
+            
+            do {
+                bytesRead = stream.Read(buffer, 0, buffer.Length);
+                ms.Write(buffer, 0, bytesRead);
+            } while (stream.DataAvailable);
+            
+            string message = Encoding.UTF8.GetString(ms.ToArray());
+            
             var json = JsonSerializer.Deserialize<JsonElement>(message);
             if (json.GetProperty("type").GetString() == "FORWARD")
             {

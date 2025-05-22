@@ -1,4 +1,4 @@
-wavy01:remover_virgulas:5:127.0.0.1
+wavy01:converter_text_json:5:127.0.0.1:json:minuto
 wavy02:nenhum:5:127.0.0.1
 wavy03:nenhum:5:127.0.0.1
 wavy04:nenhum:5:127.0.0.1
