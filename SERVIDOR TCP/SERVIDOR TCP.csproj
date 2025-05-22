@@ -9,9 +9,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Google.Protobuf" Version="3.31.0" />
+    <PackageReference Include="Google.Protobuf" Version="3.25.3" />
     <PackageReference Include="Grpc.Net.Client" Version="2.71.0" />
-    <PackageReference Include="Grpc.Tools" Version="2.72.0">
+    <PackageReference Include="Grpc.Tools" Version="2.56.0">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
@@ -21,9 +21,7 @@
     <None Update="Protos\greet.proto">
       <GrpcServices>Server</GrpcServices>
     </None>
+    <Protobuf Include="Protos\greet.proto" GrpcServices="Client" />
+    <Protobuf Include="Protos\analysis.proto" GrpcServices="Client" />
   </ItemGroup>
-
-	<ItemGroup>
-		<Protobuf Include="Protos\greet.proto" GrpcServices="Client" />
-	</ItemGroup>
 </Project>

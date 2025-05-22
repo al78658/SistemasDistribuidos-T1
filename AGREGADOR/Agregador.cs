@@ -34,10 +34,10 @@ class Agregador
 
         string serverIp = "127.0.0.1";
 
-        // Alterando as portas para conectar ao AnalysisService
-        IniciarAgregador(7001, serverIp, 8000);
-        IniciarAgregador(7002, serverIp, 8000);
-        IniciarAgregador(7003, serverIp, 8001);
+        // Corrigindo as portas para conectar ao Servidor TCP correto
+        IniciarAgregador(7001, serverIp, 6000);
+        IniciarAgregador(7002, serverIp, 6000);
+        IniciarAgregador(7003, serverIp, 6001);
 
         Console.WriteLine("AGREGADOR iniciado e a escutar nas portas 7001, 7002 e 7003.");
         Console.WriteLine("Pressiona Ctrl+C para terminar.");
