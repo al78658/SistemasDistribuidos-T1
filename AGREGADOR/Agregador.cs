@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿using System;
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -969,26 +969,29 @@ class Agregador
                         try
                         {
                             // Tentar usar o JSON diretamente
-                            JsonDocument.Parse(linha);
-                            Console.WriteLine("[DEBUG] Linha já é um JSON válido, usando diretamente");
+                            JsonDocument doc = JsonDocument.Parse(linha);
+                            Console.WriteLine("[DEBUG] Linha já é um JSON válido, processando elementos");
                             
-                            // Criar o objeto de mensagem para o servidor
-                            var dadosParaEnviarLinha = new { type = "FORWARD", data = new { id, conteudo = linha } };
-                            
-                            // Serializar a mensagem completa
-                            var optionsLinha = new JsonSerializerOptions
+                            // Extrair os elementos do array JSON e adicionar ao dadosWavy01
+                            JsonElement root = doc.RootElement;
+                            if (root.ValueKind == JsonValueKind.Array)
                             {
-                                WriteIndented = false,
-                                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-                            };
-                            string jsonLinha = JsonSerializer.Serialize(dadosParaEnviarLinha, optionsLinha);
-                            
-                            // Enviar ao servidor
-                            EnviarParaServidor(ip, port, jsonLinha);
-                            
-                            // Limpar o buffer
-                            bufferWavy[id].Clear();
-                            return;
+                                foreach (JsonElement element in root.EnumerateArray())
+                                {
+                                    if (element.ValueKind == JsonValueKind.Object)
+                                    {
+                                        var registro = new Dictionary<string, string>();
+                                        foreach (JsonProperty prop in element.EnumerateObject())
+                                        {
+                                           registro[prop.Name] = prop.Value.ToString();
+                                         }
+                                        dadosWavy01.Add(registro);
+                                        Console.WriteLine("[DEBUG] Registro JSON adicionado ao buffer");
+                                    }
+                                }
+                                // Continuamos o processamento para acumular mais dados
+                                continue;
+                            }
                         }
                         catch (JsonException)
                         {
@@ -1061,24 +1064,42 @@ class Agregador
                     {
                         Console.WriteLine("[DEBUG] Pré-processamento gerou JSON válido");
                         
-                        // Criar o objeto de mensagem para o servidor
-                        var dadosParaEnviarProcessado = new { type = "FORWARD", data = new { id, conteudo = processado } };
-                        
-                        // Serializar a mensagem completa
-                        var optionsProcessado = new JsonSerializerOptions
+                        try
                         {
-                            WriteIndented = false,
-                            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-                        };
-                        string jsonProcessado = JsonSerializer.Serialize(dadosParaEnviarProcessado, optionsProcessado);
-                        
-                        // Enviar ao servidor
-                        EnviarParaServidor(ip, port, jsonProcessado);
-                        
-                        // Limpar o buffer
-                        bufferWavy[id].Clear();
-                        return;
+                            // Tentar extrair os elementos do JSON processado
+                            JsonDocument doc = JsonDocument.Parse(processado);
+                            JsonElement root = doc.RootElement;
+                            
+                            if (root.ValueKind == JsonValueKind.Array)
+                            {
+                                foreach (JsonElement element in root.EnumerateArray())
+                                {
+                                    if (element.ValueKind == JsonValueKind.Object)
+                                    {
+                                        var registro = new Dictionary<string, string>();
+                                        foreach (JsonProperty prop in element.EnumerateObject())
+                                        {
+                                            registro[prop.Name] = prop.Value.ToString();
+                                        }
+                                        dadosWavy01.Add(registro);
+                                    }
+                                }
+                                
+                                Console.WriteLine($"[DEBUG] Extraídos {dadosWavy01.Count} registros do JSON processado");
+                            }
+                        }
+                        catch (JsonException ex)
+                        {
+                            Console.WriteLine($"[ERRO] Falha ao processar JSON: {ex.Message}");
+                        }
                     }
+                }
+                
+                // Se ainda não temos dados suficientes, retornar sem enviar
+                if (dadosWavy01.Count < GetVolume(id) && bufferWavy[id].Count < GetVolume(id))
+                {
+                    Console.WriteLine($"[BUFFER] Dados insuficientes para WAVY01: {dadosWavy01.Count}/{GetVolume(id)}. Aguardando mais dados.");
+                    return;
                 }
                 
                 // Serializar diretamente para JSON
@@ -1090,6 +1111,7 @@ class Agregador
                 
                 string jsonContent = JsonSerializer.Serialize(dadosWavy01, jsonOptions);
                 Console.WriteLine($"[BUFFER] Dados formatados diretamente para JSON: {jsonContent.Substring(0, Math.Min(100, jsonContent.Length))}...");
+                Console.WriteLine($"[BUFFER] Enviando {dadosWavy01.Count} registros para o servidor");
                 
                 // Criar o objeto de mensagem para o servidor
                 var dadosParaEnviarWavy01 = new { type = "FORWARD", data = new { id, conteudo = jsonContent } };
@@ -1106,7 +1128,15 @@ class Agregador
             }
             
             // Processamento normal para outras WAVYs
+            // Verificar se temos dados suficientes
+            if (bufferWavy[id].Count < GetVolume(id))
+            {
+                Console.WriteLine($"[BUFFER] Dados insuficientes para {id}: {bufferWavy[id].Count}/{GetVolume(id)}. Aguardando mais dados.");
+                return;
+            }
+            
             string conteudo = string.Join(" | ", bufferWavy[id]);
+            Console.WriteLine($"[BUFFER] Processando {bufferWavy[id].Count} registros para {id}");
             bufferWavy[id].Clear();
 
             if (wavyConfigs.ContainsKey(id))
