@@ -1,4 +1,4 @@
-﻿using System;
+﻿﻿﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -34,12 +34,21 @@ class Agregador
 
         string serverIp = "127.0.0.1";
 
-        // Alterando as portas para conectar ao AnalysisService
-        IniciarAgregador(7001, serverIp, 8000);
-        IniciarAgregador(7002, serverIp, 8000);
-        IniciarAgregador(7003, serverIp, 8001);
+        // Corrigindo as portas para conectar ao Servidor TCP correto
+        IniciarAgregador(7001, serverIp, 6000);
+        IniciarAgregador(7002, serverIp, 6000);
+        IniciarAgregador(7003, serverIp, 6001);
 
         Console.WriteLine("AGREGADOR iniciado e a escutar nas portas 7001, 7002 e 7003.");
+        
+        // Iniciar a conexão gRPC apenas uma vez
+        Task.Run(async () => 
+        {
+            // Aguardar um momento para garantir que tudo esteja inicializado
+            await Task.Delay(2000);
+            await IniciarRcpAsync();
+        });
+        
         Console.WriteLine("Pressiona Ctrl+C para terminar.");
 
         while (true)
@@ -52,35 +61,92 @@ class Agregador
         listener.Start();
         Console.WriteLine($"AGREGADOR a escutar na porta {port}");
 
-        Task.Run(() =>
+        Task.Run(async () =>
         {
             while (true)
             {
                 TcpClient client = listener.AcceptTcpClient();
-                Task.Run(() => HandleClient(client, serverIp, serverPort));
+                // Executar HandleClient de forma assíncrona sem bloquear o loop principal
+                _ = Task.Run(() => HandleClient(client, serverIp, serverPort));
             }
         });
-        IniciarRcp();
+        // Removido a chamada ao IniciarRcp() para cada instância do Agregador
     }
 
-    static async void IniciarRcp()
+    // Método modificado para ser chamado apenas uma vez no Main
+    static async Task IniciarRcpAsync()
     {
-        var httpHandler = new HttpClientHandler
+        Console.WriteLine("Tentando conectar ao serviço gRPC em https://localhost:7177...");
+        
+        try
         {
-            ServerCertificateCustomValidationCallback = (HttpRequestMessage, cert, chain, sslPolicyErrors) => true
-        };
+            // Verificar se o serviço está acessível antes de tentar a conexão gRPC
+            using (var tcpClient = new TcpClient())
+            {
+                try
+                {
+                    // Tentar conectar com timeout de 2 segundos
+                    var connectTask = tcpClient.ConnectAsync("localhost", 7177);
+                    var timeoutTask = Task.Delay(2000);
+                    
+                    if (await Task.WhenAny(connectTask, timeoutTask) == timeoutTask)
+                    {
+                        throw new TimeoutException("Timeout ao tentar conectar ao serviço gRPC");
+                    }
+                    
+                    Console.WriteLine("Porta 7177 está acessível, tentando estabelecer conexão gRPC...");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"AVISO: Porta 7177 não está acessível: {ex.Message}");
+                    Console.WriteLine("Verifique se o serviço PreProcessingService está em execução.");
+                    Console.WriteLine("O sistema continuará funcionando sem o serviço gRPC.");
+                    return;
+                }
+            }
+            
+            var httpHandler = new HttpClientHandler
+            {
+                ServerCertificateCustomValidationCallback = (HttpRequestMessage, cert, chain, sslPolicyErrors) => true
+            };
 
-        using var channel = GrpcChannel.ForAddress("https://localhost:7177", new GrpcChannelOptions
+            // Configurar timeout mais curto para evitar bloqueios longos
+            var httpClient = new HttpClient(httpHandler)
+            {
+                Timeout = TimeSpan.FromSeconds(5)
+            };
+
+            using var channel = GrpcChannel.ForAddress("https://localhost:7177", new GrpcChannelOptions
+            {
+                HttpHandler = httpHandler,
+                // Adicionar configurações de timeout para o canal gRPC
+                MaxReceiveMessageSize = 4 * 1024 * 1024, // 4MB
+                MaxSendMessageSize = 4 * 1024 * 1024     // 4MB
+            });
+
+            var client = new AGREGADOR.Greeter.GreeterClient(channel);
+            
+            // Usar um timeout para a chamada gRPC
+            var callOptions = new Grpc.Core.CallOptions(deadline: DateTime.UtcNow.AddSeconds(5));
+            var reply = await client.SayHelloAsync(
+                              new HelloRequest { Name = "AGREGADOR" }, callOptions);
+            
+            Console.WriteLine("Conexão gRPC estabelecida com sucesso!");
+            Console.WriteLine("Greeting: " + reply.Message);
+        }
+        catch (Exception ex)
         {
-            HttpHandler = httpHandler
-        });
-
-        var client = new AGREGADOR.Greeter.GreeterClient(channel);
-        var reply = await client.SayHelloAsync(
-                          new HelloRequest { Name = "AGREGADOR" });
-        Console.WriteLine("Greeting: " + reply.Message);
-        Console.WriteLine("Press any key to exit...");
-        Console.ReadKey();
+            Console.WriteLine($"AVISO: Não foi possível conectar ao serviço gRPC: {ex.Message}");
+            if (ex.InnerException != null)
+            {
+                Console.WriteLine($"Causa: {ex.InnerException.Message}");
+            }
+            Console.WriteLine("O sistema continuará funcionando sem o serviço gRPC.");
+            Console.WriteLine("Para resolver este problema:");
+            Console.WriteLine("1. Verifique se o serviço PreProcessingService está em execução");
+            Console.WriteLine("2. Verifique se a porta 7177 está disponível e não bloqueada por firewall");
+            Console.WriteLine("3. Execute o PreProcessingService com o comando: dotnet run --project PreProcessingService");
+        }
     }
     static void LoadConfigurations()
     {
@@ -104,7 +170,7 @@ class Agregador
         RecarregarStatusWavy();
     }
 
-    static void HandleClient(TcpClient client, string serverIp, int serverPort)
+    static async Task HandleClient(TcpClient client, string serverIp, int serverPort)
     {
         try
         {
@@ -204,7 +270,7 @@ class Agregador
                     SendResponse(stream, new { type = "ACK", message = "Dados recebidos." });
 
                     if (bufferWavy[wavyId].Count >= GetVolume(wavyId))
-                        SendBufferedData(serverIp, serverPort, wavyId);
+                        await SendBufferedData(serverIp, serverPort, wavyId);
 
                     break;
 
@@ -218,7 +284,7 @@ class Agregador
 
                 case "END":
                     string endId = json.GetProperty("id").GetString().ToLower();
-                    SendBufferedData(serverIp, serverPort, endId);
+                    await SendBufferedData(serverIp, serverPort, endId);
                     AtualizarEstadoWavy(endId, "desativada");
                     SendResponse(stream, new { type = "ACK", message = $"Sessao terminada para {endId}." });
                     break;
@@ -361,30 +427,100 @@ class Agregador
         }
     }
 
-    static void SendBufferedData(string ip, int port, string id)
+    static async Task SendBufferedData(string ip, int port, string id)
     {
         if (bufferWavy.ContainsKey(id) && bufferWavy[id].Count > 0)
         {
             string conteudo = string.Join(" | ", bufferWavy[id]);
             bufferWavy[id].Clear();
 
-            if (wavyConfigs.ContainsKey(id))
+            // Chamada gRPC para pré-processamento remoto
+            string processedData = null;
+            
+            // Verificar se devemos tentar usar o serviço gRPC
+            bool useGrpc = false;
+            
+            // Verificar rapidamente se o serviço está acessível
+            using (var tcpClient = new TcpClient())
             {
-                string preproc = wavyConfigs[id].PreProcessamento;
-                conteudo = PreProcessar(conteudo, preproc);
+                try
+                {
+                    var connectTask = tcpClient.ConnectAsync("localhost", 7177);
+                    var timeoutTask = Task.Delay(500); // Timeout curto para não atrasar muito
+                    
+                    if (await Task.WhenAny(connectTask, timeoutTask) == connectTask)
+                    {
+                        useGrpc = true;
+                    }
+                }
+                catch
+                {
+                    // Ignorar erros e continuar sem gRPC
+                }
+            }
+            
+            if (useGrpc)
+            {
+                try
+                {
+                    var httpHandler = new HttpClientHandler
+                    {
+                        ServerCertificateCustomValidationCallback = (message, cert, chain, errors) => true
+                    };
+                    
+                    // Configurar timeout mais curto para evitar bloqueios longos
+                    var httpClient = new HttpClient(httpHandler)
+                    {
+                        Timeout = TimeSpan.FromSeconds(3)
+                    };
+                    
+                    using var channel = Grpc.Net.Client.GrpcChannel.ForAddress("https://localhost:7177", 
+                        new Grpc.Net.Client.GrpcChannelOptions 
+                        { 
+                            HttpHandler = httpHandler,
+                            // Adicionar configurações de timeout para o canal gRPC
+                            MaxReceiveMessageSize = 4 * 1024 * 1024, // 4MB
+                            MaxSendMessageSize = 4 * 1024 * 1024     // 4MB
+                        });
+                    
+                    var grpcClient = new PreProcessingService.Protos.PreProcessing.PreProcessingClient(channel);
+                    var preprocType = wavyConfigs.ContainsKey(id) ? wavyConfigs[id].PreProcessamento : "nenhum";
+                    var grpcRequest = new PreProcessingService.Protos.PreProcessRequest { WavyId = id, RawData = conteudo };
+                    
+                    // Usar um timeout para a chamada gRPC
+                    var callOptions = new Grpc.Core.CallOptions(deadline: DateTime.UtcNow.AddSeconds(3));
+                    var grpcResponse = grpcClient.PreProcess(grpcRequest, callOptions);
+                    processedData = grpcResponse.ProcessedData;
+                    
+                    Console.WriteLine($"[INFO] Dados processados com sucesso pelo serviço gRPC para {id}");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[AVISO] Falha ao chamar o serviço de pré-processamento gRPC: {ex.Message}");
+                    Console.WriteLine("[INFO] Usando dados sem pré-processamento remoto.");
+                    // Em vez de retornar, vamos usar os dados originais
+                    processedData = conteudo;
+                }
+            }
+            else
+            {
+                // Usar pré-processamento local
+                string preproc = wavyConfigs.ContainsKey(id) ? wavyConfigs[id].PreProcessamento : "nenhum";
+                processedData = PreProcessar(conteudo, preproc);
+                Console.WriteLine($"[INFO] Usando pré-processamento local ({preproc}) para {id}");
             }
 
-            if (conteudo == null)
+            if (string.IsNullOrWhiteSpace(processedData))
             {
-                Console.WriteLine($"[ERRO] Conteúdo inválido após pré-processamento para {id}");
+                Console.WriteLine($"[ERRO] Conteúdo inválido após pré-processamento remoto para {id}");
                 return;
             }
 
-            Console.WriteLine($"[ENVIANDO PARA SERVIDOR] {id}: {conteudo}");
+            Console.WriteLine($"[ENVIANDO PARA SERVIDOR] {id}: {processedData}");
 
             try
             {
-                var payload = new { type = "FORWARD", data = new { id, conteudo } };
+                var payload = new { type = "FORWARD", data = new { id, conteudo = processedData } };
                 string json = JsonSerializer.Serialize(payload);
                 byte[] buffer = Encoding.UTF8.GetBytes(json);
 

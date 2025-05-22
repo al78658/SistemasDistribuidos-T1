@@ -1,0 +1,23 @@
+﻿syntax = "proto3";
+
+option csharp_namespace = "AnalysisService.Protos";
+
+package analysis;
+
+// Mensagem para enviar dados para análise
+message DataRequest {
+  string source = 1; // Nome do remetente
+  repeated double values = 2; // Dados numéricos para análise
+}
+
+// Mensagem de resposta com resultados estatísticos
+message AnalysisResult {
+  double mean = 1;
+  double stddev = 2;
+  string pattern = 3; // Exemplo: "increasing", "decreasing", "random"
+}
+
+// Serviço de análise
+service DataAnalysis {
+  rpc Analyze (DataRequest) returns (AnalysisResult);
+}
