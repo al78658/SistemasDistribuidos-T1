@@ -1,4 +1,6 @@
-﻿﻿﻿using System;
+﻿﻿using System;
+using RabbitMQ.Client;
+using RabbitMQ.Client.Events;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -34,25 +36,64 @@ class Agregador
 
         string serverIp = "127.0.0.1";
 
-        // Corrigindo as portas para conectar ao Servidor TCP correto
+
+        // Iniciar subscrição RabbitMQ
+        Task.Run(() => IniciarRabbitMqSubscriber());
+
+        // TCP legacy (comentado, não usar mais)
+        /*
         IniciarAgregador(7001, serverIp, 6000);
         IniciarAgregador(7002, serverIp, 6000);
         IniciarAgregador(7003, serverIp, 6001);
+        */
 
-        Console.WriteLine("AGREGADOR iniciado e a escutar nas portas 7001, 7002 e 7003.");
-        
-        // Iniciar a conexão gRPC apenas uma vez
+        // gRPC
         Task.Run(async () => 
         {
-            // Aguardar um momento para garantir que tudo esteja inicializado
             await Task.Delay(2000);
             await IniciarRcpAsync();
         });
-        
+
+        Console.WriteLine("AGREGADOR iniciado e subscrevendo tópicos RabbitMQ.");
         Console.WriteLine("Pressiona Ctrl+C para terminar.");
 
         while (true)
             Thread.Sleep(1000);
+    }
+
+    static void IniciarRabbitMqSubscriber()
+    {
+        var factory = new ConnectionFactory() { HostName = "localhost" };
+        using var connection = factory.CreateConnection();
+        using var channel = connection.CreateModel();
+
+        channel.ExchangeDeclare(exchange: "wavy_data", type: ExchangeType.Topic);
+
+        string[] topics = { "Hs", "Hmax", "Tz", "Tp", "Peak Direction", "SST" };
+        var queueName = channel.QueueDeclare().QueueName;
+        foreach (var topic in topics)
+            channel.QueueBind(queue: queueName, exchange: "wavy_data", routingKey: topic);
+
+        var consumer = new EventingBasicConsumer(channel);
+        consumer.Received += (model, ea) =>
+        {
+            var body = ea.Body.ToArray();
+            var message = Encoding.UTF8.GetString(body);
+            var topic = ea.RoutingKey;
+            Console.WriteLine($"[AGREGADOR][RabbitMQ] Recebido do tópico {topic}: {message}");
+            // Aqui pode processar e agregar os dados conforme necessário
+            // Exemplo: bufferizar por tópico
+            lock (bufferWavy)
+            {
+                if (!bufferWavy.ContainsKey(topic))
+                    bufferWavy[topic] = new List<string>();
+                bufferWavy[topic].Add(message);
+            }
+        };
+        channel.BasicConsume(queue: queueName, autoAck: true, consumer: consumer);
+
+        // Mantém o consumidor ativo
+        while (true) Thread.Sleep(1000);
     }
 
     static void IniciarAgregador(int port, string serverIp, int serverPort)

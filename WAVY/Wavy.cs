@@ -1,4 +1,6 @@
 ﻿using System;
+using RabbitMQ.Client;
+using RabbitMQ.Client.Events;
 using System.IO;
 using System.Net.Sockets;
 using System.Text;
@@ -209,17 +211,18 @@ class Wavy
 
             string progressFile = $"{PROGRESS_PREFIX}{wavyId}.txt";
 
-            var (ip, port) = SendStartAndGetIp(aggregatorIp, aggregatorPort);
-            if (string.IsNullOrEmpty(ip))
-            {
-                Console.WriteLine($"[WAVY {wavyId}] Falha ao obter IP do Agregador.");
-                return;
-            }
+            // TCP handshake removido: WAVY agora usa apenas RabbitMQ
+            // var (ip, port) = SendStartAndGetIp(aggregatorIp, aggregatorPort);
+            // if (string.IsNullOrEmpty(ip))
+            // {
+            //     Console.WriteLine($"[WAVY {wavyId}] Falha ao obter IP do Agregador.");
+            //     return;
+            // }
+            // aggregatorIp = ip;
+            // aggregatorPort = port;
+            // Console.WriteLine($"[WAVY {wavyId}] Agregador: {aggregatorIp}:{aggregatorPort}");
 
-            aggregatorIp = ip;
-            aggregatorPort = port;
-            Console.WriteLine($"[WAVY {wavyId}] Agregador: {aggregatorIp}:{aggregatorPort}");
-
+            // Usar apenas RabbitMQ para transmissão de dados
             StartDataTransmission(aggregatorIp, aggregatorPort, wavyId, csvFile, progressFile);
         }
         catch (Exception ex)
@@ -232,20 +235,18 @@ class Wavy
 
     static void StartDataTransmission(string aggregatorIp, int aggregatorPort, string wavyId, string csvFile, string progressFile)
     {
-        string mutexKey = $"{aggregatorIp}:{aggregatorPort}";
-        Mutex mutex;
-
-        lock (mutexLock)
-        {
-            if (!mutexPorAgregador.ContainsKey(mutexKey))
-                mutexPorAgregador[mutexKey] = new Mutex();
-            mutex = mutexPorAgregador[mutexKey];
-        }
-
         int lastProcessedLine = LoadProgress(progressFile);
         Console.WriteLine($"[WAVY {wavyId}] Última linha processada: {lastProcessedLine}");
 
         string[] lines = File.ReadAllLines(csvFile);
+
+        // RabbitMQ setup
+        var factory = new ConnectionFactory() { HostName = "localhost" };
+        using var connection = factory.CreateConnection();
+        using var channel = connection.CreateModel();
+        channel.ExchangeDeclare(exchange: "wavy_data", type: ExchangeType.Topic);
+
+        string[] tipos = { "Hs", "Hmax", "Tz", "Tp", "Peak Direction", "SST" };
 
         for (int i = Math.Max(lastProcessedLine + 1, 1); i < lines.Length; i++)
         {
@@ -277,80 +278,30 @@ class Wavy
             {
                 try
                 {
-                    globalMutex.WaitOne();
-                    mutex.WaitOne();
-
-                    Console.WriteLine($"[WAVY {wavyId}] A enviar linha {i}: {line}");
+                    Console.WriteLine($"[WAVY {wavyId}] Publicando linha {i}: {line}");
                     Thread.Sleep(delay);
 
-                    var payload = new
+                    string[] valores = line.Split(',');
+                    for (int j = 0; j < tipos.Length && j < valores.Length; j++)
                     {
-                        type = "DATA",
-                        id = wavyId,
-                        conteudo = line
-                    };
-
-                    string resposta = SendMessageWithResponse(aggregatorIp, aggregatorPort, payload);
-
-                    if (resposta.Contains("WAVY desativada"))
-                    {
-                        Console.WriteLine($"[WAVY {wavyId}] O agregador respondeu que está desativada, mas ignorando essa instrução. Aguardando reativação...");
-                        Thread.Sleep(2000);
-                        i--; // Repetir esta linha depois
-                        continue;
+                        string topic = tipos[j];
+                        string mensagem = valores[j];
+                        var body = Encoding.UTF8.GetBytes(mensagem);
+                        channel.BasicPublish(exchange: "wavy_data",
+                                            routingKey: topic,
+                                            basicProperties: null,
+                                            body: body);
+                        Console.WriteLine($"[WAVY {wavyId}] Publicado {mensagem} no tópico {topic}");
                     }
-
-                    else if (resposta.Contains("WAVY em manutencao"))
-                    {
-                        Console.WriteLine($"[WAVY {wavyId}] WAVY em manutenção segundo agregador. A aguardar...");
-                        Thread.Sleep(2000);
-                        i--; // Tentar novamente depois
-                        continue;
-                    }
-                    else if (resposta.Contains("ACK"))
-                    {
-                        Console.WriteLine($"[WAVY {wavyId}] Dados recebidos com sucesso.");
-                        SaveProgress(progressFile, i);
-                    }
-                    else
-                    {
-                        Console.WriteLine($"[WAVY {wavyId}] Resposta inesperada: {resposta}. Vai tentar novamente esta linha.");
-                        i--; // Repetir esta linha depois
-                        Thread.Sleep(2000);
-                    }
+                    SaveProgress(progressFile, i);
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[WAVY {wavyId}] Erro ao enviar dados: {ex.Message}");
+                    Console.WriteLine($"[WAVY {wavyId}] Erro ao publicar dados: {ex.Message}");
                     break;
-                }
-                finally
-                {
-                    mutex.ReleaseMutex();
-                    globalMutex.ReleaseMutex();
                 }
             }
         }
-
-        try
-        {
-            globalMutex.WaitOne();
-            mutex.WaitOne();
-            Console.WriteLine($"[WAVY {wavyId}] A enviar mensagem END...");
-            var endPayload = new { type = "END", id = wavyId };
-            string replyEnd = SendMessageWithResponse(aggregatorIp, aggregatorPort, endPayload);
-            Console.WriteLine($"[WAVY {wavyId}] Resposta END: {replyEnd}");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[WAVY {wavyId}] Erro ao enviar END: {ex.Message}");
-        }
-        finally
-        {
-            mutex.ReleaseMutex();
-            globalMutex.ReleaseMutex();
-        }
-
         Console.WriteLine($"[WAVY {wavyId}] Transmissão finalizada.");
     }
 
@@ -376,46 +327,50 @@ class Wavy
     }
 
 
-    static (string, int) SendStartAndGetIp(string initialIp, int port)
-    {
-        string json = JsonSerializer.Serialize(new { type = "START" });
-        byte[] buffer = Encoding.UTF8.GetBytes(json);
 
-        using (TcpClient client = new TcpClient(initialIp, port))
-        using (NetworkStream stream = client.GetStream())
-        {
-            stream.Write(buffer, 0, buffer.Length);
+    // TCP handshake removido: WAVY agora usa apenas RabbitMQ
+    // static (string, int) SendStartAndGetIp(string initialIp, int port)
+    // {
+    //     string json = JsonSerializer.Serialize(new { type = "START" });
+    //     byte[] buffer = Encoding.UTF8.GetBytes(json);
+    //
+    //     using (TcpClient client = new TcpClient(initialIp, port))
+    //     using (NetworkStream stream = client.GetStream())
+    //     {
+    //         stream.Write(buffer, 0, buffer.Length);
+    //
+    //         byte[] response = new byte[1024];
+    //         int bytesRead = stream.Read(response, 0, response.Length);
+    //         string reply = Encoding.UTF8.GetString(response, 0, bytesRead);
+    //
+    //         var jsonResp = JsonSerializer.Deserialize<JsonElement>(reply);
+    //         if (jsonResp.GetProperty("type").GetString() == "ACK")
+    //         {
+    //             string ip = jsonResp.GetProperty("ip").GetString();
+    //             int receivedPort = jsonResp.GetProperty("port").GetInt32();
+    //             return (ip, receivedPort);
+    //         }
+    //     }
+    //     return (null, 0);
+    // }
 
-            byte[] response = new byte[1024];
-            int bytesRead = stream.Read(response, 0, response.Length);
-            string reply = Encoding.UTF8.GetString(response, 0, bytesRead);
 
-            var jsonResp = JsonSerializer.Deserialize<JsonElement>(reply);
-            if (jsonResp.GetProperty("type").GetString() == "ACK")
-            {
-                string ip = jsonResp.GetProperty("ip").GetString();
-                int receivedPort = jsonResp.GetProperty("port").GetInt32();
-                return (ip, receivedPort);
-            }
-        }
-        return (null, 0);
-    }
-
-    static string SendMessageWithResponse(string serverIp, int port, object payload)
-    {
-        string json = JsonSerializer.Serialize(payload);
-        byte[] buffer = Encoding.UTF8.GetBytes(json);
-
-        using (TcpClient client = new TcpClient(serverIp, port))
-        using (NetworkStream stream = client.GetStream())
-        {
-            stream.Write(buffer, 0, buffer.Length);
-
-            byte[] response = new byte[1024];
-            int bytesRead = stream.Read(response, 0, response.Length);
-            return Encoding.UTF8.GetString(response, 0, bytesRead);
-        }
-    }
+    // TCP communication removed: WAVY agora usa apenas RabbitMQ
+    // static string SendMessageWithResponse(string serverIp, int port, object payload)
+    // {
+    //     string json = JsonSerializer.Serialize(payload);
+    //     byte[] buffer = Encoding.UTF8.GetBytes(json);
+    //
+    //     using (TcpClient client = new TcpClient(serverIp, port))
+    //     using (NetworkStream stream = client.GetStream())
+    //     {
+    //         stream.Write(buffer, 0, buffer.Length);
+    //
+    //         byte[] response = new byte[1024];
+    //         int bytesRead = stream.Read(response, 0, response.Length);
+    //         return Encoding.UTF8.GetString(response, 0, bytesRead);
+    //     }
+    // }
 
     static int LoadProgress(string progressFile)
     {
