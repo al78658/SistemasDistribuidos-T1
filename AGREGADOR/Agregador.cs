@@ -368,23 +368,38 @@ class Agregador
             string conteudo = string.Join(" | ", bufferWavy[id]);
             bufferWavy[id].Clear();
 
-            if (wavyConfigs.ContainsKey(id))
+            // Chamada gRPC para pré-processamento remoto
+            string processedData = null;
+            try
             {
-                string preproc = wavyConfigs[id].PreProcessamento;
-                conteudo = PreProcessar(conteudo, preproc);
+                var httpHandler = new HttpClientHandler
+                {
+                    ServerCertificateCustomValidationCallback = (message, cert, chain, errors) => true
+                };
+                using var channel = Grpc.Net.Client.GrpcChannel.ForAddress("https://localhost:7177", new Grpc.Net.Client.GrpcChannelOptions { HttpHandler = httpHandler });
+                var grpcClient = new PreProcessingService.Protos.PreProcessing.PreProcessingClient(channel);
+                var preprocType = wavyConfigs.ContainsKey(id) ? wavyConfigs[id].PreProcessamento : "nenhum";
+                var grpcRequest = new PreProcessingService.Protos.PreProcessRequest { WavyId = id, RawData = conteudo };
+                var grpcResponse = grpcClient.PreProcess(grpcRequest);
+                processedData = grpcResponse.ProcessedData;
             }
-
-            if (conteudo == null)
+            catch (Exception ex)
             {
-                Console.WriteLine($"[ERRO] Conteúdo inválido após pré-processamento para {id}");
+                Console.WriteLine($"[ERRO] Falha ao chamar o serviço de pré-processamento gRPC: {ex.Message}");
                 return;
             }
 
-            Console.WriteLine($"[ENVIANDO PARA SERVIDOR] {id}: {conteudo}");
+            if (string.IsNullOrWhiteSpace(processedData))
+            {
+                Console.WriteLine($"[ERRO] Conteúdo inválido após pré-processamento remoto para {id}");
+                return;
+            }
+
+            Console.WriteLine($"[ENVIANDO PARA SERVIDOR] {id}: {processedData}");
 
             try
             {
-                var payload = new { type = "FORWARD", data = new { id, conteudo } };
+                var payload = new { type = "FORWARD", data = new { id, conteudo = processedData } };
                 string json = JsonSerializer.Serialize(payload);
                 byte[] buffer = Encoding.UTF8.GetBytes(json);
 
