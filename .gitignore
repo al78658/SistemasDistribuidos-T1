@@ -361,3 +361,11 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+/AGREGADOR/bin/Debug/net8.0/AGREGADOR.dll
+/AGREGADOR/bin/Debug/net8.0/AGREGADOR.exe
+/AGREGADOR/bin/Debug/net8.0/AGREGADOR.pdb
+/SERVIDOR TCP/bin/Debug/net8.0/dados_servidor1.txt
+/SERVIDOR TCP/bin/Debug/net8.0/SERVIDOR TCP.dll
+/SERVIDOR TCP/bin/Debug/net8.0/SERVIDOR TCP.exe
+/SERVIDOR TCP/bin/Debug/net8.0/SERVIDOR TCP.pdb
+/WAVY/bin/Debug/net8.0/progress_wavy01.txt
