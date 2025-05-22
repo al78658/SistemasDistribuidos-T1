@@ -8,19 +8,19 @@
     ".NETCoreApp,Version=v8.0": {
       "SERVIDOR TCP/1.0.0": {
         "dependencies": {
-          "Google.Protobuf": "3.31.0",
+          "Google.Protobuf": "3.25.3",
           "Grpc.Net.Client": "2.71.0",
-          "Grpc.Tools": "2.72.0"
+          "Grpc.Tools": "2.56.0"
         },
         "runtime": {
           "SERVIDOR TCP.dll": {}
         }
       },
-      "Google.Protobuf/3.31.0": {
+      "Google.Protobuf/3.25.3": {
         "runtime": {
           "lib/net5.0/Google.Protobuf.dll": {
-            "assemblyVersion": "3.31.0.0",
-            "fileVersion": "3.31.0.0"
+            "assemblyVersion": "3.25.3.0",
+            "fileVersion": "3.25.3.0"
           }
         }
       },
@@ -55,7 +55,7 @@
           }
         }
       },
-      "Grpc.Tools/2.72.0": {},
+      "Grpc.Tools/2.56.0": {},
       "Microsoft.Extensions.Logging.Abstractions/6.0.0": {
         "runtime": {
           "lib/net6.0/Microsoft.Extensions.Logging.Abstractions.dll": {
@@ -72,12 +72,12 @@
       "serviceable": false,
       "sha512": ""
     },
-    "Google.Protobuf/3.31.0": {
+    "Google.Protobuf/3.25.3": {
       "type": "package",
       "serviceable": true,
-      "sha512": "sha512-OZXSf6igaJBeo+kAzMhYF0R5zp0nRgf4G0Uis/IsGKACc4RGP9bQPLpHLengIFuASl0lY92utMB8rRpTx4TaOg==",
-      "path": "google.protobuf/3.31.0",
-      "hashPath": "google.protobuf.3.31.0.nupkg.sha512"
+      "sha512": "sha512-fDY/kt0gy2nVcoeMmiyDMtwgvDJG5qaU7+Ic77szKTvVkIvoo7tyf+d+QDlKSosB+FjoKocX/ObObxqKCq60uA==",
+      "path": "google.protobuf/3.25.3",
+      "hashPath": "google.protobuf.3.25.3.nupkg.sha512"
     },
     "Grpc.Core.Api/2.71.0": {
       "type": "package",
@@ -100,12 +100,12 @@
       "path": "grpc.net.common/2.71.0",
       "hashPath": "grpc.net.common.2.71.0.nupkg.sha512"
     },
-    "Grpc.Tools/2.72.0": {
+    "Grpc.Tools/2.56.0": {
       "type": "package",
       "serviceable": true,
-      "sha512": "sha512-BCiuQ03EYjLHCo9hqZmY5barsz5vvcz/+/ICt5wCbukaePHZmMPDGelKlkxWx3q+f5xOMNHa9zXQ2N6rQZ4B+w==",
-      "path": "grpc.tools/2.72.0",
-      "hashPath": "grpc.tools.2.72.0.nupkg.sha512"
+      "sha512": "sha512-e63/x4belx+nj84o31nssKhIvwmntTT+hesW2lJs/3UZ6hpVy5KgVEtqRVq1mD007YJ24e8d0Jw4cgFVeD9eHg==",
+      "path": "grpc.tools/2.56.0",
+      "hashPath": "grpc.tools.2.56.0.nupkg.sha512"
     },
     "Microsoft.Extensions.Logging.Abstractions/6.0.0": {
       "type": "package",
