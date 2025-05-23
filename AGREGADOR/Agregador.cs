@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿using System;
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -36,7 +36,6 @@ class Agregador
         LoadConfigurations();
 
         // Forçar a configuração da WAVY01 para converter_text_json
-        Console.WriteLine("[CONFIG] Forçando configuração da WAVY01 para converter_text_json");
         wavyConfigs["wavy01"] = new WavyConfig
         {
             PreProcessamento = "converter_text_json",
@@ -125,20 +124,13 @@ class Agregador
     }
     static void LoadConfigurations()
     {
-        Console.WriteLine("[CONFIG] Carregando configurações...");
-        
         if (File.Exists("config_wavy.txt"))
         {
-            Console.WriteLine("[CONFIG] Arquivo config_wavy.txt encontrado");
-            
             foreach (var line in File.ReadLines("config_wavy.txt"))
             {
-                Console.WriteLine($"[CONFIG] Lendo linha: {line}");
-                
                 var parts = line.Split(':');
                 if (parts.Length < 4)
                 {
-                    Console.WriteLine("[CONFIG] Linha ignorada: formato inválido");
                     continue;
                 }
 
@@ -157,13 +149,7 @@ class Agregador
                     FormatoDados = formato,
                     TaxaLeitura = taxa
                 };
-                
-                Console.WriteLine($"[CONFIG] WAVY {wavyId} configurada: PreProc={preProc}, Volume={volume}, Servidor={servidor}, Formato={formato}, Taxa={taxa}");
             }
-        }
-        else
-        {
-            Console.WriteLine("[CONFIG] Arquivo config_wavy.txt não encontrado");
         }
 
         RecarregarStatusWavy();
@@ -268,14 +254,6 @@ class Agregador
                     }
 
                     string preproc = wavyConfigs.ContainsKey(wavyId) ? wavyConfigs[wavyId].PreProcessamento : "nenhum";
-                    
-                    // Log para depuração
-                    Console.WriteLine($"[DEBUG] WAVY {wavyId} - Pré-processamento: {preproc}");
-                    if (wavyConfigs.ContainsKey(wavyId))
-                    {
-                        Console.WriteLine($"[DEBUG] WAVY {wavyId} - Formato: {wavyConfigs[wavyId].FormatoDados}, Taxa: {wavyConfigs[wavyId].TaxaLeitura}");
-                    }
-                    
                     conteudo = PreProcessar(conteudo, preproc, wavyId);
 
                     if (conteudo == null)
@@ -285,8 +263,6 @@ class Agregador
                     }
 
                     bufferWavy[wavyId].Add(conteudo);
-                    Console.WriteLine($"[BUFFER] {wavyId}: {bufferWavy[wavyId].Count}/{GetVolume(wavyId)} armazenados.");
-
                     SendResponse(stream, new { type = "ACK", message = "Dados recebidos." });
 
                     if (bufferWavy[wavyId].Count >= GetVolume(wavyId))
@@ -324,12 +300,9 @@ class Agregador
     {
         lock (configLock)
         {
-            Console.WriteLine($"[CONFIG] Recarregando configuração para WAVY {wavyId}");
-            
             // Forçar a configuração da WAVY01 para converter_text_json
             if (wavyId.ToLower() == "wavy01")
             {
-                Console.WriteLine("[CONFIG] Forçando configuração da WAVY01 para converter_text_json");
                 wavyConfigs[wavyId] = new WavyConfig
                 {
                     PreProcessamento = "converter_text_json",
@@ -345,16 +318,12 @@ class Agregador
             {
                 foreach (var line in File.ReadLines("config_wavy.txt"))
                 {
-                    Console.WriteLine($"[CONFIG] Lendo linha: {line}");
-                    
                     var parts = line.Split(':');
                     if (parts.Length < 4) continue;
 
                     string id = parts[0].ToLower();
                     if (id == wavyId)
                     {
-                        Console.WriteLine($"[CONFIG] Encontrada configuração para WAVY {wavyId}");
-                        
                         wavyConfigs[id] = new WavyConfig
                         {
                             PreProcessamento = parts[1],
@@ -363,15 +332,9 @@ class Agregador
                             FormatoDados = parts.Length > 4 ? parts[4] : "text",
                             TaxaLeitura = parts.Length > 5 ? parts[5] : "minuto"
                         };
-                        
-                        Console.WriteLine($"[CONFIG] WAVY {id} configurada: PreProc={parts[1]}, Volume={parts[2]}, Servidor={parts[3]}, Formato={(parts.Length > 4 ? parts[4] : "text")}, Taxa={(parts.Length > 5 ? parts[5] : "minuto")}");
                         break;
                     }
                 }
-            }
-            else
-            {
-                Console.WriteLine("[CONFIG] Arquivo config_wavy.txt não encontrado");
             }
         }
     }
@@ -428,13 +391,11 @@ class Agregador
             {
                 // Tentar validar o JSON existente
                 JsonDocument.Parse(data);
-                Console.WriteLine("[PRÉ-PROCESSAMENTO] Dados já estão em formato JSON válido, pulando conversão");
                 return data;
             }
             catch (JsonException)
             {
                 // Se não for um JSON válido, continuar com a conversão normal
-                Console.WriteLine("[PRÉ-PROCESSAMENTO] Dados parecem ser JSON mas são inválidos, continuando com a conversão");
             }
         }
         
@@ -456,11 +417,8 @@ class Agregador
             {
                 processedData = ProcessarViaRPC(processedData, tipo, wavyId);
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                Console.WriteLine($"[ERRO RPC] Falha ao processar via RPC: {ex.Message}");
-                Console.WriteLine("[FALLBACK] Usando processamento local para converter_text_json");
-                
                 // Implementar fallback para converter_text_json
                 if (tipo == "converter_text_json")
                 {
@@ -1286,7 +1244,6 @@ class Agregador
             // Recarregar o estado em memória após atualizar o arquivo
             RecarregarStatusWavy();
         }
-        Console.WriteLine($"Estado da WAVY {wavyId} ({novoStatus}) atualizado no ficheiro status.txt");
     }
 
 
@@ -1297,17 +1254,10 @@ class Agregador
             var config = wavyConfigs[wavyId];
             string linha = $"{wavyId}:{config.PreProcessamento}:{config.VolumeDadosEnviar}:{config.ServidorAssociado}:{config.FormatoDados}:{config.TaxaLeitura}";
 
-            Console.WriteLine($"[CONFIG] Atualizando configuração da WAVY {wavyId}: {linha}");
-
             var linhas = new List<string>();
             if (File.Exists("config_wavy.txt"))
             {
                 linhas = new List<string>(File.ReadAllLines("config_wavy.txt"));
-                Console.WriteLine($"[CONFIG] Arquivo config_wavy.txt encontrado com {linhas.Count} linhas");
-            }
-            else
-            {
-                Console.WriteLine("[CONFIG] Arquivo config_wavy.txt não encontrado, será criado");
             }
             
             bool linhaAtualizada = false;
@@ -1316,7 +1266,6 @@ class Agregador
             {
                 if (linhas[i].StartsWith(wavyId + ":"))
                 {
-                    Console.WriteLine($"[CONFIG] Atualizando linha existente: {linhas[i]} -> {linha}");
                     linhas[i] = linha;
                     linhaAtualizada = true;
                     break;
@@ -1325,17 +1274,14 @@ class Agregador
 
             if (!linhaAtualizada)
             {
-                Console.WriteLine($"[CONFIG] Adicionando nova linha: {linha}");
                 linhas.Add(linha);
             }
 
             File.WriteAllLines("config_wavy.txt", linhas);
-            Console.WriteLine($"[CONFIG] Arquivo config_wavy.txt atualizado com sucesso");
             
             // Recarregar a configuração para garantir que está atualizada em memória
             RecarregarConfiguracaoWavy(wavyId);
         }
-        Console.WriteLine($"Configuração da WAVY {wavyId} atualizada no ficheiro config_wavy.txt");
     }
 }
 
