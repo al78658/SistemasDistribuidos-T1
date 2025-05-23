@@ -60,7 +60,6 @@ class Agregador
         {
             // Aguardar um momento para garantir que tudo esteja inicializado
             await Task.Delay(2000);
-            await IniciarRcpAsync();
         });
         
         Console.WriteLine("Pressiona Ctrl+C para terminar.");
