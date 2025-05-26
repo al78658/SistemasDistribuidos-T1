@@ -12,6 +12,8 @@ using System.Net.Http;
 using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
 using Grpc.Net.Client;
+using RabbitMQ.Client;
+using RabbitMQ.Client.Events;
 using AGREGADOR;
 
 class Agregador
