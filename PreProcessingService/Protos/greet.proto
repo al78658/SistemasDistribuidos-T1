@@ -8,6 +8,12 @@ package greet;
 service Greeter {
   // Sends a greeting
   rpc SayHello (HelloRequest) returns (HelloReply);
+  
+  // Process data from different formats to a standardized format
+  rpc ProcessData (ProcessDataRequest) returns (ProcessDataReply);
+  
+  // Standardize reading rates for consistent analysis
+  rpc StandardizeReadingRate (StandardizeRateRequest) returns (StandardizeRateReply);
 }
 
 // The request message containing the user's name.
@@ -18,4 +24,51 @@ message HelloRequest {
 // The response message containing the greetings.
 message HelloReply {
   string message = 1;
+}
+
+// Data format types supported by the preprocessing service
+enum DataFormat {
+  TEXT = 0;
+  CSV = 1;
+  XML = 2;
+  JSON = 3;
+}
+
+// Reading rate intervals
+enum ReadingInterval {
+  PER_SECOND = 0;
+  PER_MINUTE = 1;
+  PER_HOUR = 2;
+  CUSTOM = 3;
+}
+
+// Request for data processing
+message ProcessDataRequest {
+  string wavy_id = 1;
+  string data = 2;
+  DataFormat source_format = 3;
+  DataFormat target_format = 4;
+}
+
+// Response with processed data
+message ProcessDataReply {
+  string processed_data = 1;
+  bool success = 2;
+  string error_message = 3;
+}
+
+// Request for standardizing reading rates
+message StandardizeRateRequest {
+  string wavy_id = 1;
+  string data = 2;
+  ReadingInterval source_interval = 3;
+  ReadingInterval target_interval = 4;
+  int32 custom_interval_seconds = 5; // Used when interval is CUSTOM
+}
+
+// Response with standardized data
+message StandardizeRateReply {
+  string standardized_data = 1;
+  bool success = 2;
+  string error_message = 3;
 }
