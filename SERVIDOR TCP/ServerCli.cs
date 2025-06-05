@@ -1,11 +1,11 @@
-﻿﻿using System;
+﻿using System;
 using System.Globalization;
 using System.IO;
 using System.Linq;
 
 class ServerCli
 {
-    static void MainCli(string[] args)
+    static void Main(string[] args)
     {
         string logFile = "dados_servidor1.txt";
 
