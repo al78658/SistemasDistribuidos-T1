@@ -21,7 +21,7 @@ class Servidor
 
     static DataAnalysis.DataAnalysisClient? analysisClient;
 
-    static void Main(string[] args)
+    static void Main2(string[] args)
     {
         int port1 = 6000;
         int port2 = 6001;
