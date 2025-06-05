@@ -1,4 +1,4 @@
-﻿﻿﻿using System;
+﻿﻿﻿﻿﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -54,7 +54,7 @@ class Agregador
         // Iniciar subscrição RabbitMQ
         Task.Run(() => IniciarRabbitMqSubscriber());
 
-        // TCP legacy (comentado, não usar mais)
+        // TCP legacy (desabilitado - agora usando RabbitMQ + gRPC)
         /*
         IniciarAgregador(7001, serverIp, 6000);
         IniciarAgregador(7002, serverIp, 6000);
@@ -88,25 +88,185 @@ class Agregador
             channel.QueueBind(queue: queueName, exchange: "wavy_data", routingKey: topic);
 
         var consumer = new EventingBasicConsumer(channel);
-        consumer.Received += (model, ea) =>
+        consumer.Received += async (model, ea) =>
         {
             var body = ea.Body.ToArray();
             var message = Encoding.UTF8.GetString(body);
             var topic = ea.RoutingKey;
             Console.WriteLine($"[AGREGADOR][RabbitMQ] Recebido do tópico {topic}: {message}");
-            // Aqui pode processar e agregar os dados conforme necessário
-            // Exemplo: bufferizar por tópico
-            lock (bufferWavy)
-            {
-                if (!bufferWavy.ContainsKey(topic))
-                    bufferWavy[topic] = new List<string>();
-                bufferWavy[topic].Add(message);
-            }
+            
+            // Processar e agregar os dados por WAVY
+            await ProcessarDadosRabbitMQ(topic, message);
         };
         channel.BasicConsume(queue: queueName, autoAck: true, consumer: consumer);
 
         // Mantém o consumidor ativo
         while (true) Thread.Sleep(1000);
+    }
+
+    static async Task ProcessarDadosRabbitMQ(string topic, string message)
+    {
+        // Assumir que os dados vêm de uma WAVY específica (pode ser expandido para identificar a WAVY)
+        // Por agora, vamos usar "wavy01" como padrão ou extrair do contexto
+        string wavyId = "wavy01"; // Pode ser expandido para identificar a WAVY real
+        
+        lock (bufferWavy)
+        {
+            if (!bufferWavy.ContainsKey(wavyId))
+                bufferWavy[wavyId] = new List<string>();
+            
+            // Agregar dados por tópico em formato estruturado
+            string dadoEstruturado = $"{topic}:{message}";
+            bufferWavy[wavyId].Add(dadoEstruturado);
+            
+            Console.WriteLine($"[AGREGADOR] Dados agregados para {wavyId}: {bufferWavy[wavyId].Count}/{GetVolume(wavyId)}");
+        }
+        
+        // Verificar se temos dados suficientes para enviar
+        if (bufferWavy[wavyId].Count >= GetVolume(wavyId))
+        {
+            await ProcessarEEnviarDadosAgregados(wavyId);
+        }
+    }
+
+    static async Task ProcessarEEnviarDadosAgregados(string wavyId)
+    {
+        try
+        {
+            Console.WriteLine($"[AGREGADOR] Iniciando processamento de dados agregados para {wavyId}");
+            
+            // 1. Preparar dados agregados
+            string dadosAgregados;
+            lock (bufferWavy)
+            {
+                if (!bufferWavy.ContainsKey(wavyId) || bufferWavy[wavyId].Count == 0)
+                {
+                    Console.WriteLine($"[AGREGADOR] Nenhum dado disponível para {wavyId}");
+                    return;
+                }
+                
+                dadosAgregados = string.Join(" | ", bufferWavy[wavyId]);
+                bufferWavy[wavyId].Clear(); // Limpar buffer após agregação
+                Console.WriteLine($"[AGREGADOR] Dados agregados: {dadosAgregados.Substring(0, Math.Min(100, dadosAgregados.Length))}...");
+            }
+            
+            // 2. Enviar para PreprocessingService via gRPC
+            string dadosProcessados = await EnviarParaPreprocessingService(wavyId, dadosAgregados);
+            
+            if (string.IsNullOrEmpty(dadosProcessados))
+            {
+                Console.WriteLine($"[AGREGADOR] Falha no pré-processamento para {wavyId}. Dados descartados.");
+                return;
+            }
+            
+            // 3. Enviar dados processados para o servidor
+            await EnviarDadosProcessadosParaServidor(wavyId, dadosProcessados);
+            
+            Console.WriteLine($"[AGREGADOR] Fluxo completo finalizado para {wavyId}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[AGREGADOR] Erro no processamento de dados para {wavyId}: {ex.Message}");
+        }
+    }
+
+    static async Task<string> EnviarParaPreprocessingService(string wavyId, string dadosAgregados)
+    {
+        try
+        {
+            Console.WriteLine($"[AGREGADOR→PREPROCESSING] Enviando dados para pré-processamento: {wavyId}");
+            
+            // Configurar cliente gRPC para PreprocessingService
+            var httpHandler = new HttpClientHandler
+            {
+                ServerCertificateCustomValidationCallback = (message, cert, chain, errors) => true
+            };
+            
+            using var channel = Grpc.Net.Client.GrpcChannel.ForAddress("https://localhost:7177", 
+                new Grpc.Net.Client.GrpcChannelOptions 
+                { 
+                    HttpHandler = httpHandler,
+                    MaxReceiveMessageSize = 4 * 1024 * 1024, // 4MB
+                    MaxSendMessageSize = 4 * 1024 * 1024     // 4MB
+                });
+            
+            var client = new PreProcessingService.Protos.PreProcessing.PreProcessingClient(channel);
+            
+            // Criar requisição
+            var request = new PreProcessingService.Protos.PreProcessRequest 
+            { 
+                WavyId = wavyId, 
+                RawData = dadosAgregados 
+            };
+            
+            // Enviar para pré-processamento
+            var callOptions = new Grpc.Core.CallOptions(deadline: DateTime.UtcNow.AddSeconds(10));
+            var response = await client.PreProcessAsync(request, callOptions);
+            
+            Console.WriteLine($"[PREPROCESSING→AGREGADOR] Dados processados recebidos para {wavyId}");
+            Console.WriteLine($"[PREPROCESSING→AGREGADOR] Dados: {response.ProcessedData.Substring(0, Math.Min(100, response.ProcessedData.Length))}...");
+            
+            return response.ProcessedData;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[AGREGADOR] Erro ao comunicar com PreprocessingService: {ex.Message}");
+            Console.WriteLine($"[AGREGADOR] Usando dados originais sem pré-processamento para {wavyId}");
+            return dadosAgregados; // Fallback para dados originais
+        }
+    }
+
+    static async Task EnviarDadosProcessadosParaServidor(string wavyId, string dadosProcessados)
+    {
+        try
+        {
+            Console.WriteLine($"[AGREGADOR→SERVIDOR] Enviando dados processados para o servidor: {wavyId}");
+            
+            // Obter configuração do servidor para esta WAVY
+            string serverIp = "127.0.0.1"; // Padrão
+            int serverPort = 6000; // Padrão
+            
+            if (wavyConfigs.ContainsKey(wavyId))
+            {
+                serverIp = wavyConfigs[wavyId].ServidorAssociado;
+                // Determinar porta baseada na configuração ou ID da WAVY
+                serverPort = wavyId.ToLower() == "wavy01" ? 6000 : 6001;
+            }
+            
+            // Formatar dados para envio ao servidor
+            var dadosParaServidor = new 
+            { 
+                type = "FORWARD", 
+                data = new 
+                { 
+                    id = wavyId, 
+                    conteudo = dadosProcessados 
+                } 
+            };
+            
+            var jsonOptions = new JsonSerializerOptions
+            {
+                WriteIndented = false,
+                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+            };
+            
+            string jsonMessage = JsonSerializer.Serialize(dadosParaServidor, jsonOptions);
+            
+            // Enviar via TCP para o servidor
+            using var client = new TcpClient(serverIp, serverPort);
+            using var stream = client.GetStream();
+            
+            byte[] buffer = Encoding.UTF8.GetBytes(jsonMessage);
+            await stream.WriteAsync(buffer, 0, buffer.Length);
+            await stream.FlushAsync();
+            
+            Console.WriteLine($"[AGREGADOR→SERVIDOR] Dados enviados com sucesso para {serverIp}:{serverPort}");
+            Console.WriteLine($"[AGREGADOR→SERVIDOR] Tamanho: {buffer.Length} bytes");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[AGREGADOR] Erro ao enviar dados para o servidor: {ex.Message}");
+        }
     }
 
     static void IniciarAgregador(int port, string serverIp, int serverPort)
