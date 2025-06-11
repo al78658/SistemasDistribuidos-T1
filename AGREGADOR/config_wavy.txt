@@ -1,0 +1,1 @@
+wavy01:converter_text_json:5:127.0.0.1:json:minuto

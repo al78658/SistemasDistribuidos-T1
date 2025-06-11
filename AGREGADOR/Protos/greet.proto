@@ -55,6 +55,7 @@ message ProcessDataReply {
   string processed_data = 1;
   bool success = 2;
   string error_message = 3;
+  string preprocessing_applied = 4;
 }
 
 // Request for standardizing reading rates

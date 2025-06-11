@@ -6,6 +6,7 @@
 		<RootNamespace>SERVIDOR_TCP</RootNamespace>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
+		<StartupObject>SERVIDOR_TCP.ServerCli</StartupObject>
 	</PropertyGroup>
 
 	<ItemGroup>

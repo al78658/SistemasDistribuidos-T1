@@ -44,7 +44,8 @@ namespace PreProcessingService.Services
                 return Task.FromResult(new ProcessDataReply
                 {
                     ProcessedData = processedData,
-                    Success = true
+                    Success = true,
+                    PreprocessingApplied = $"Conversion from {request.SourceFormat} to {request.TargetFormat}"
                 });
             }
             catch (Exception ex)
@@ -53,7 +54,8 @@ namespace PreProcessingService.Services
                 return Task.FromResult(new ProcessDataReply
                 {
                     Success = false,
-                    ErrorMessage = ex.Message
+                    ErrorMessage = ex.Message,
+                    PreprocessingApplied = "Error during processing"
                 });
             }
         }
@@ -111,103 +113,40 @@ namespace PreProcessingService.Services
         private List<Dictionary<string, object>> ParseTextData(string data)
         {
             var result = new List<Dictionary<string, object>>();
-            
-            // Log the input data for debugging
-            _logger.LogInformation($"Parsing text data: {data.Substring(0, Math.Min(100, data.Length))}...");
-            
-            // Split by pipe first to handle multiple records
-            var records = data.Split(new[] { '|' }, StringSplitOptions.RemoveEmptyEntries);
-            
-            foreach (var record in records)
+            _logger.LogInformation($"Parsing text data as JSON container: {data.Substring(0, Math.Min(200, data.Length))}...");
+
+            try
             {
-                var trimmedRecord = record.Trim();
-                if (string.IsNullOrWhiteSpace(trimmedRecord))
-                    continue;
-                
-                // Check if the record contains a comma (CSV-like format)
-                if (trimmedRecord.Contains(","))
+                using (JsonDocument doc = JsonDocument.Parse(data))
                 {
-                    var parts = trimmedRecord.Split(',');
-                    if (parts.Length >= 2)
+                    JsonElement root = doc.RootElement;
+                    string wavyId = root.GetProperty("wavy_id").GetString();
+                    string topic = root.GetProperty("topic").GetString();
+                    JsonElement records = root.GetProperty("records");
+
+                    foreach (JsonElement record in records.EnumerateArray())
                     {
-                        // Assuming first part is date/time
-                        var entry = new Dictionary<string, object>();
-                        
-                        // Try to parse as date/time format
-                        if (DateTime.TryParseExact(parts[0].Trim(), 
-                            new[] { "dd/MM/yyyy HH:mm", "yyyy-MM-dd HH:mm", "MM/dd/yyyy HH:mm" },
-                            CultureInfo.InvariantCulture, 
-                            DateTimeStyles.None, 
-                            out var dt))
+                        var entry = new Dictionary<string, object>
                         {
-                            entry["timestamp"] = dt.ToString("yyyy-MM-dd HH:mm");
-                        }
-                        else
-                        {
-                            entry["timestamp"] = parts[0].Trim();
-                        }
-                        
-                        // Add remaining values with proper names
-                        string[] columnNames = { "Hs", "Hmax", "Tz", "Tp", "Direction", "SST" };
-                        
-                        for (int i = 1; i < parts.Length; i++)
-                        {
-                            string key = i <= columnNames.Length ? columnNames[i-1] : $"value{i}";
-                            entry[key] = parts[i].Trim();
-                        }
-                        
-                        result.Add(entry);
-                    }
-                }
-                else
-                {
-                    // Space-separated format
-                    var values = trimmedRecord.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-                    if (values.Length >= 2)
-                    {
-                        var entry = new Dictionary<string, object>();
-                        
-                        // Try to parse as date/time format
-                        if (values.Length >= 3 && DateTime.TryParseExact(
-                            $"{values[0]} {values[1]}", 
-                            new[] { "dd/MM/yyyy HH:mm", "yyyy-MM-dd HH:mm", "MM/dd/yyyy HH:mm" },
-                            CultureInfo.InvariantCulture, 
-                            DateTimeStyles.None, 
-                            out var dt))
-                        {
-                            entry["timestamp"] = dt.ToString("yyyy-MM-dd HH:mm");
-                            
-                            // Add remaining values with proper names
-                            string[] columnNames = { "Hs", "Hmax", "Tz", "Tp", "Direction", "SST" };
-                            
-                            for (int i = 2; i < values.Length; i++)
-                            {
-                                string key = (i-2) < columnNames.Length ? columnNames[i-2] : $"value{i-1}";
-                                entry[key] = values[i].Trim();
-                            }
-                        }
-                        else
-                        {
-                            // Fallback to simple format
-                            entry["timestamp"] = values[0].Trim();
-                            
-                            string[] columnNames = { "Hs", "Hmax", "Tz", "Tp", "Direction", "SST" };
-                            
-                            for (int i = 1; i < values.Length; i++)
-                            {
-                                string key = (i-1) < columnNames.Length ? columnNames[i-1] : $"value{i}";
-                                entry[key] = values[i].Trim();
-                            }
-                        }
-                        
+                            { "wavy_id", wavyId },
+                            { "topic", topic },
+                            { "data", record.GetString() },
+                            { "timestamp", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") } // Atribui um novo timestamp no processamento
+                        };
                         result.Add(entry);
                     }
                 }
             }
-            
-            // Log the parsed result
+            catch (JsonException ex)
+            {
+                _logger.LogError(ex, "Falha ao analisar os dados de texto recebidos como o formato de contêiner JSON esperado.");
+                // Se falhar, não podemos processá-lo, então lançamos uma exceção.
+                // Lançar é melhor, pois será capturado pelo método chamador e relatado como uma falha.
+                throw new ArgumentException("Os dados de entrada não estão no formato de contêiner JSON esperado.", ex);
+            }
+
             _logger.LogInformation($"Parsed {result.Count} records from text data");
-            
+
             return result;
         }
         
@@ -464,21 +403,40 @@ namespace PreProcessingService.Services
         
         private string ConvertToJson(List<Dictionary<string, object>> data)
         {
-            // Create a list of dictionaries with proper string values
-            var cleanData = data.Select(entry => 
-                entry.ToDictionary(
-                    kvp => kvp.Key, 
-                    kvp => kvp.Value?.ToString() // Convert all values to strings
-                )
-            ).ToList();
-            
-            // Use compact JSON format without indentation for better transmission
-            return JsonSerializer.Serialize(cleanData, new JsonSerializerOptions 
-            { 
-                WriteIndented = false,
-                PropertyNamingPolicy = null, // Preserve property names as-is
-                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping // Avoid excessive escaping
-            });
+            if (data == null || !data.Any())
+            {
+                _logger.LogWarning("ConvertToFormat received empty or null data for JSON conversion.");
+                return "{}";
+            }
+
+            var firstRecord = data.First();
+            string wavyId = firstRecord.TryGetValue("wavy_id", out var id) ? id?.ToString() : "unknown";
+            string topic = firstRecord.TryGetValue("topic", out var t) ? t?.ToString() : "unknown";
+
+            // Create a list of objects for the "records" array.
+            var recordsList = data.Select(entry => new
+            {
+                data = entry.TryGetValue("data", out var d) ? d?.ToString() : null,
+                timestamp = entry.TryGetValue("timestamp", out var ts) ? ts?.ToString() : null
+            }).ToList();
+
+            // Construct the final JSON object that the TCP server expects.
+            var finalObject = new
+            {
+                wavy_id = wavyId,
+                topic = topic,
+                timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"), // A new timestamp for the entire batch.
+                records = recordsList // This will be serialized as a proper JSON array of objects.
+            };
+
+            var options = new JsonSerializerOptions
+            {
+                WriteIndented = false, // Compact format for network transmission.
+                PropertyNamingPolicy = null, // Keep property names like "wavy_id".
+                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+            };
+
+            return JsonSerializer.Serialize(finalObject, options);
         }
         
         #endregion

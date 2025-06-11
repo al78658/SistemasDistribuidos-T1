@@ -1,4 +1,4 @@
-﻿﻿﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -14,6 +14,7 @@ using System.Security.Cryptography.X509Certificates;
 using Grpc.Net.Client;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
+using PreProcessingService.Protos;
 using AGREGADOR;
 
 class Agregador
@@ -24,7 +25,7 @@ class Agregador
     static readonly object fileLock = new();
     static readonly object statusLock = new();
     static readonly object configLock = new();
-    
+
     // Canal RPC global para ser reutilizado
     static GrpcChannel rpcChannel;
 
@@ -38,15 +39,15 @@ class Agregador
         LoadConfigurations();
 
         // Forçar a configuração da WAVY01 para converter_text_json
-        wavyConfigs["wavy01"] = new WavyConfig
-        {
-            PreProcessamento = "converter_text_json",
-            VolumeDadosEnviar = 5,
-            ServidorAssociado = "127.0.0.1",
-            FormatoDados = "json",
-            TaxaLeitura = "minuto"
-        };
-        AtualizarConfigWavy("wavy01");
+        //wavyConfigs["wavy01"] = new WavyConfig
+        //{
+        //    PreProcessamento = "converter_text_json",
+        //    VolumeDadosEnviar = 5,
+        //    ServidorAssociado = "127.0.0.1",
+        //    FormatoDados = "json",
+        //    TaxaLeitura = "minuto"
+        //};
+        //AtualizarConfigWavy("wavy01");
 
         string serverIp = "127.0.0.1";
 
@@ -62,9 +63,11 @@ class Agregador
         */
 
         // gRPC
-        Task.Run(async () => 
+        Task.Run(async () =>
         {
             await Task.Delay(2000);
+            // Iniciar a conexão RPC
+            IniciarRcp();
         });
 
         Console.WriteLine("AGREGADOR iniciado e subscrevendo tópicos RabbitMQ.");
@@ -94,14 +97,48 @@ class Agregador
             var message = Encoding.UTF8.GetString(body);
             var topic = ea.RoutingKey;
             Console.WriteLine($"[AGREGADOR][RabbitMQ] Recebido do tópico {topic}: {message}");
-            // Aqui pode processar e agregar os dados conforme necessário
-            // Exemplo: bufferizar por tópico
+
+            // Assumir uma WAVY padrão para mensagens simples
+            string wavyId = "wavy01";
+            string formattedMessage = message;
+
+            // A mensagem original (message) será usada diretamente, sem conversão para JSON.
+            // A conversão será responsabilidade do serviço de pré-processamento.
+            formattedMessage = message;
+
+            // Bufferizar os dados por WAVY e por tópico
             lock (bufferWavy)
             {
-                if (!bufferWavy.ContainsKey(topic))
-                    bufferWavy[topic] = new List<string>();
-                bufferWavy[topic].Add(message);
+                string bufferKey = $"{wavyId}_{topic}";
+                if (!bufferWavy.ContainsKey(bufferKey))
+                    bufferWavy[bufferKey] = new List<string>();
+
+                // Armazenar a mensagem formatada em JSON
+                bufferWavy[bufferKey].Add(formattedMessage);
+
+                Console.WriteLine($"[BUFFER] Adicionado ao buffer {bufferKey}: {formattedMessage}. Total: {bufferWavy[bufferKey].Count}");
+                Thread.Sleep(1000); // Pausa de 1 segundo para visualizar a chegada de cada mensagem
+
+                // Verificar se atingiu o volume necessário para enviar
+                if (bufferWavy[bufferKey].Count >= GetVolume(wavyId))
+                {
+                    Console.WriteLine($"[AGREGADOR] Buffer de {wavyId} para {topic} atingiu volume {bufferWavy[bufferKey].Count}. Enviando para processamento...");
+                    // Passa o servidor associado da WAVY para utilizar a porta correta
+                    string serverIp = "127.0.0.1";
+                    int serverPort = 6000; // Porta do servidor final ajustada para 6000
+
+                    if (wavyConfigs.ContainsKey(wavyId) && !string.IsNullOrEmpty(wavyConfigs[wavyId].ServidorAssociado))
+                    {
+                        serverIp = wavyConfigs[wavyId].ServidorAssociado;
+                    }
+
+                    SendBufferedData(serverIp, serverPort, wavyId, bufferKey);
+                    Console.WriteLine($"[AGREGADOR] Dados agregados enviados para {wavyId}_{topic}. Aguardando 3 segundos para facilitar visualização...");
+                    Thread.Sleep(3000); // Pausa de 3 segundos após envio do lote
+                }
             }
+            Console.WriteLine($"[DEBUG] Mensagem processada para {wavyId}_{topic}. Aguardando 1 segundo antes de processar a próxima mensagem...");
+            Thread.Sleep(1000); // Pausa de 1 segundo após processar cada mensagem
         };
         channel.BasicConsume(queue: queueName, autoAck: true, consumer: consumer);
 
@@ -146,7 +183,7 @@ class Agregador
             var reply = await client.SayHelloAsync(
                               new HelloRequest { Name = "AGREGADOR" });
             Console.WriteLine("Conexão RPC estabelecida: " + reply.Message);
-            
+
             // Testar a conexão com os novos serviços
             try
             {
@@ -157,7 +194,7 @@ class Agregador
                     SourceFormat = DataFormat.Text,
                     TargetFormat = DataFormat.Text
                 });
-                
+
                 Console.WriteLine("Serviço de processamento de dados RPC disponível");
             }
             catch (Exception ex)
@@ -189,7 +226,7 @@ class Agregador
                 string servidor = parts[3];
                 string formato = parts.Length > 4 ? parts[4] : "text";
                 string taxa = parts.Length > 5 ? parts[5] : "minuto";
-                
+
                 wavyConfigs[wavyId] = new WavyConfig
                 {
                     PreProcessamento = preProc,
@@ -209,19 +246,20 @@ class Agregador
         try
         {
             NetworkStream stream = client.GetStream();
-            
+
             // Increase buffer size and use MemoryStream for larger messages
             byte[] buffer = new byte[8192]; // Increased from 2048 to 8192
-            
+
             // Read all available data from the stream
             using MemoryStream ms = new MemoryStream();
             int bytesRead;
-            
-            do {
+
+            do
+            {
                 bytesRead = stream.Read(buffer, 0, buffer.Length);
                 ms.Write(buffer, 0, bytesRead);
             } while (stream.DataAvailable);
-            
+
             string message = Encoding.UTF8.GetString(ms.ToArray()).Trim();
 
             if (string.IsNullOrWhiteSpace(message)) return;
@@ -315,7 +353,7 @@ class Agregador
                     SendResponse(stream, new { type = "ACK", message = "Dados recebidos." });
 
                     if (bufferWavy[wavyId].Count >= GetVolume(wavyId))
-                        SendBufferedData(serverIp, serverPort, wavyId);
+                        Task.Run(() => SendBufferedData(serverIp, serverPort, wavyId));
 
                     break;
 
@@ -350,19 +388,19 @@ class Agregador
         lock (configLock)
         {
             // Forçar a configuração da WAVY01 para converter_text_json
-            if (wavyId.ToLower() == "wavy01")
-            {
-                wavyConfigs[wavyId] = new WavyConfig
-                {
-                    PreProcessamento = "converter_text_json",
-                    VolumeDadosEnviar = 5,
-                    ServidorAssociado = "127.0.0.1",
-                    FormatoDados = "json",
-                    TaxaLeitura = "minuto"
-                };
-                return;
-            }
-            
+            //if (wavyId.ToLower() == "wavy01")
+            //{
+            //    wavyConfigs[wavyId] = new WavyConfig
+            //    {
+            //        PreProcessamento = "converter_text_json",
+            //        VolumeDadosEnviar = 5,
+            //        ServidorAssociado = "127.0.0.1",
+            //        FormatoDados = "json",
+            //        TaxaLeitura = "minuto"
+            //    };
+            //    return;
+            //}
+
             if (File.Exists("config_wavy.txt"))
             {
                 foreach (var line in File.ReadLines("config_wavy.txt"))
@@ -425,120 +463,48 @@ class Agregador
         Console.WriteLine($"[RESPOSTA ENVIADA] {jsonResponse}");
     }
 
-    static int GetVolume(string id)
+    // Retorna o volume de dados a ser enviado para a WAVY especificada
+    static int GetVolume(string wavyId)
     {
-        return wavyConfigs.ContainsKey(id) ? wavyConfigs[id].VolumeDadosEnviar : 5;
+        lock (configLock)
+        {
+            if (wavyConfigs.ContainsKey(wavyId))
+                return wavyConfigs[wavyId].VolumeDadosEnviar;
+
+            // Valor padrão se não houver configuração específica
+            return 5;
+        }
     }
 
     static string PreProcessar(string data, string tipo, string wavyId = "unknown")
     {
         // Verificar se os dados já estão no formato JSON e o tipo é converter_text_json
-        if (tipo == "converter_text_json" && 
+        if (tipo == "converter_text_json" &&
             ((data.StartsWith("[") && data.EndsWith("]")) || (data.StartsWith("{") && data.EndsWith("}"))))
         {
             try
             {
                 // Tentar validar o JSON existente
                 JsonDocument.Parse(data);
-                return data;
+                return data; // Se já for JSON, não faz nada
             }
             catch (JsonException)
             {
-                // Se não for um JSON válido, continuar com a conversão normal
+                // Se não for um JSON válido, o processamento local pode ser necessário
             }
         }
-        
-        // Primeiro, aplicamos o pré-processamento local básico
+
+        // Aplicamos o pré-processamento local básico
         string processedData = tipo switch
         {
             "trim" => data.Trim(),
             "validar_corrigir" => ValidarECorrigir(data),
             "remover_virgulas" => RemoverVirgulas(data),
             "nenhum" => data,
-            _ => data
+            _ => data // Para tipos como 'converter_*', o pré-processamento local não faz nada
         };
-        
-        // Se o tipo de pré-processamento incluir conversão de formato ou padronização de taxa de leitura,
-        // usamos o serviço RPC
-        if (tipo.Contains("converter_"))
-        {
-            try
-            {
-                processedData = ProcessarViaRPC(processedData, tipo, wavyId);
-            }
-            catch (Exception)
-            {
-                // Implementar fallback para converter_text_json
-                if (tipo == "converter_text_json")
-                {
-                    processedData = FormatarDadosParaJson(processedData);
-                }
-            }
-        }
-        else if (tipo.Contains("padronizar_"))
-        {
-            try
-            {
-                processedData = ProcessarViaRPC(processedData, tipo, wavyId);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[ERRO RPC] Falha ao processar via RPC: {ex.Message}");
-                // Manter os dados originais
-            }
-        }
-        // Se o tipo for "auto", detectamos automaticamente o formato e aplicamos a conversão adequada
-        else if (tipo == "auto" && wavyConfigs.ContainsKey(wavyId))
-        {
-            var config = wavyConfigs[wavyId];
-            
-            // Detectar o formato de entrada
-            var sourceFormat = DetectarFormatoDados(processedData);
-            Console.WriteLine($"[AUTO-DETECÇÃO] Formato detectado para WAVY {wavyId}: {sourceFormat}");
-            
-            // Se o formato de destino estiver definido e for diferente do formato detectado
-            if (!string.IsNullOrEmpty(config.FormatoDados))
-            {
-                var targetFormat = ParseDataFormat(config.FormatoDados);
-                if (sourceFormat != targetFormat)
-                {
-                    string tipoConversao = $"converter_{sourceFormat.ToString().ToLower()}_{config.FormatoDados}";
-                    Console.WriteLine($"[AUTO-CONVERSÃO] Aplicando conversão: {tipoConversao}");
-                    processedData = ProcessarViaRPC(processedData, tipoConversao, wavyId);
-                }
-            }
-            
-            // Se a taxa de leitura estiver definida, aplicamos a padronização
-            if (!string.IsNullOrEmpty(config.TaxaLeitura) && config.TaxaLeitura != "minuto")
-            {
-                string tipoPadronizacao = $"padronizar_minuto_{config.TaxaLeitura}";
-                Console.WriteLine($"[AUTO-PADRONIZAÇÃO] Aplicando padronização: {tipoPadronizacao}");
-                processedData = ProcessarViaRPC(processedData, tipoPadronizacao, wavyId);
-            }
-        }
-        // Se não for um tipo especial, mas a WAVY tiver configurações de formato ou taxa,
-        // aplicamos o processamento automático
-        else if (wavyConfigs.ContainsKey(wavyId))
-        {
-            var config = wavyConfigs[wavyId];
-            
-            // Se o formato de dados estiver definido, aplicamos a conversão
-            if (!string.IsNullOrEmpty(config.FormatoDados) && config.FormatoDados != "text")
-            {
-                string tipoConversao = $"converter_text_{config.FormatoDados}";
-                Console.WriteLine($"[CONVERSÃO] Aplicando conversão para WAVY {wavyId}: {tipoConversao}");
-                processedData = ProcessarViaRPC(processedData, tipoConversao, wavyId);
-            }
-            
-            // Se a taxa de leitura estiver definida, aplicamos a padronização
-            if (!string.IsNullOrEmpty(config.TaxaLeitura) && config.TaxaLeitura != "minuto")
-            {
-                string tipoPadronizacao = $"padronizar_minuto_{config.TaxaLeitura}";
-                Console.WriteLine($"[PADRONIZAÇÃO] Aplicando padronização para WAVY {wavyId}: {tipoPadronizacao}");
-                processedData = ProcessarViaRPC(processedData, tipoPadronizacao, wavyId);
-            }
-        }
-        
+
+        // A chamada RPC foi removida daqui para ser feita exclusivamente no SendToServer.
         return processedData;
     }
 
@@ -550,22 +516,22 @@ class Agregador
             if (rpcChannel == null)
             {
                 Console.WriteLine("[ERRO RPC] Canal RPC não inicializado. Usando processamento local.");
-                
+
                 // Implementar fallback local para converter_text_json
                 if (tipo == "converter_text_json")
                 {
                     Console.WriteLine("[FALLBACK] Usando processamento local para converter_text_json");
                     return FormatarDadosParaJson(data);
                 }
-                
+
                 return data;
             }
 
             var client = new AGREGADOR.Greeter.GreeterClient(rpcChannel);
-            
+
             Console.WriteLine($"[PRÉ-PROCESSAMENTO RPC] Iniciando para WAVY {wavyId} com tipo: {tipo}");
             Console.WriteLine($"[PRÉ-PROCESSAMENTO RPC] Dados originais: {data.Substring(0, Math.Min(50, data.Length))}...");
-            
+
             // Determinar o tipo de processamento necessário
             if (tipo.StartsWith("converter_"))
             {
@@ -578,17 +544,17 @@ class Agregador
                         Console.WriteLine("[ERRO RPC] Formato de tipo inválido. Esperado: converter_origem_destino");
                         return data;
                     }
-                    
+
                     var sourceFormat = ParseDataFormat(parts[1]);
                     var targetFormat = ParseDataFormat(parts[2]);
-                    
+
                     // Implementar fallback local para converter_text_json
                     if (sourceFormat == DataFormat.Text && targetFormat == DataFormat.Json)
                     {
                         try
                         {
                             Console.WriteLine("[PRÉ-PROCESSAMENTO RPC] Tentando usar serviço RPC...");
-                            
+
                             // Criar uma nova requisição para o serviço RPC
                             var request = new ProcessDataRequest
                             {
@@ -597,13 +563,22 @@ class Agregador
                                 SourceFormat = sourceFormat,
                                 TargetFormat = targetFormat
                             };
-                            
+
                             // Chamar o serviço RPC de forma síncrona com timeout
                             var reply = client.ProcessData(request);
-                            
+
                             if (reply.Success)
                             {
                                 Console.WriteLine($"[PRÉ-PROCESSAMENTO RPC] Conversão de formato concluída com sucesso");
+                                Console.WriteLine($"[PRÉ-PROCESSAMENTO RPC] Tipo de pré-processamento aplicado: {reply.PreprocessingApplied}");
+                                Console.WriteLine($"[PRÉ-PROCESSAMENTO RPC] Detalhes do pré-processamento:");
+                                Console.WriteLine($"  - Formato de origem: {request.SourceFormat}");
+                                Console.WriteLine($"  - Formato de destino: {request.TargetFormat}");
+                                if (wavyConfigs.ContainsKey(wavyId))
+                                {
+                                    Console.WriteLine($"  - Configuração da WAVY: {wavyConfigs[wavyId].PreProcessamento}");
+                                    Console.WriteLine($"  - Taxa de leitura: {wavyConfigs[wavyId].TaxaLeitura}");
+                                }
                                 return reply.ProcessedData;
                             }
                             else
@@ -629,14 +604,14 @@ class Agregador
                 catch (Exception ex)
                 {
                     Console.WriteLine($"[ERRO RPC] Exceção durante a conversão de formato: {ex.Message}");
-                    
+
                     // Implementar fallback local para converter_text_json
                     if (tipo == "converter_text_json")
                     {
                         Console.WriteLine("[FALLBACK] Usando processamento local para converter_text_json");
                         return FormatarDadosParaJson(data);
                     }
-                    
+
                     return data;
                 }
             }
@@ -651,12 +626,25 @@ class Agregador
                         Console.WriteLine("[ERRO RPC] Formato de tipo inválido. Esperado: padronizar_origem_destino");
                         return data;
                     }
-                    
-                    var sourceInterval = ParseReadingInterval(parts[1]);
-                    var targetInterval = ParseReadingInterval(parts[2]);
-                    
+
+                    var sourceInterval = parts[1].ToLower() switch
+                    {
+                        "original" or "segundo" => ReadingInterval.PerSecond,
+                        "minuto" => ReadingInterval.PerMinute,
+                        "hora" => ReadingInterval.PerHour,
+                        _ => ReadingInterval.PerSecond
+                    };
+
+                    var targetInterval = parts[2].ToLower() switch
+                    {
+                        "original" or "segundo" => ReadingInterval.PerSecond,
+                        "minuto" => ReadingInterval.PerMinute,
+                        "hora" => ReadingInterval.PerHour,
+                        _ => ReadingInterval.PerSecond
+                    };
+
                     Console.WriteLine($"[PRÉ-PROCESSAMENTO RPC] Padronizando taxa de leitura de {sourceInterval} para {targetInterval}");
-                    
+
                     // Criar uma nova requisição para o serviço RPC
                     var request = new StandardizeRateRequest
                     {
@@ -666,16 +654,17 @@ class Agregador
                         TargetInterval = targetInterval,
                         CustomIntervalSeconds = 0 // Valor padrão
                     };
-                    
+
                     Console.WriteLine("[PRÉ-PROCESSAMENTO RPC] Enviando requisição para o serviço RPC...");
-                    
+
                     // Chamar o serviço RPC de forma síncrona
                     var reply = client.StandardizeReadingRate(request);
-                    
+
                     if (reply.Success)
                     {
                         Console.WriteLine($"[PRÉ-PROCESSAMENTO RPC] Padronização de taxa concluída com sucesso");
                         Console.WriteLine($"[PRÉ-PROCESSAMENTO RPC] Dados padronizados: {reply.StandardizedData.Substring(0, Math.Min(50, reply.StandardizedData.Length))}...");
+                        Console.WriteLine($"[PRÉ-PROCESSAMENTO RPC] Tipo de pré-processamento aplicado: Padronização de taxa de leitura de {sourceInterval} para {targetInterval}");
                         return reply.StandardizedData;
                     }
                     else
@@ -691,25 +680,25 @@ class Agregador
                     return data; // Retorna os dados originais em caso de erro
                 }
             }
-            
+
             return data;
         }
         catch (Exception ex)
         {
             Console.WriteLine($"[ERRO RPC] Exceção geral: {ex.Message}");
             Console.WriteLine($"[ERRO RPC] Stack trace: {ex.StackTrace}");
-            
+
             // Implementar fallback local para converter_text_json
             if (tipo == "converter_text_json")
             {
                 Console.WriteLine("[FALLBACK] Usando processamento local para converter_text_json");
                 return FormatarDadosParaJson(data);
             }
-            
+
             return data; // Retorna os dados originais em caso de erro
         }
     }
-    
+
     static DataFormat ParseDataFormat(string format)
     {
         return format.ToLower() switch
@@ -721,41 +710,41 @@ class Agregador
             _ => DataFormat.Text // Formato padrão
         };
     }
-    
+
     static DataFormat DetectarFormatoDados(string data)
     {
         // Remover espaços em branco no início e fim
         data = data.Trim();
-        
+
         // Verificar se é JSON
-        if ((data.StartsWith("{") && data.EndsWith("}")) || 
+        if ((data.StartsWith("{") && data.EndsWith("}")) ||
             (data.StartsWith("[") && data.EndsWith("]")))
         {
             return DataFormat.Json;
         }
-        
+
         // Verificar se é XML
-        if (data.StartsWith("<?xml") || 
+        if (data.StartsWith("<?xml") ||
             (data.StartsWith("<") && data.EndsWith(">")))
         {
             return DataFormat.Xml;
         }
-        
+
         // Verificar se é CSV (verificando se tem vírgulas e linhas)
         if (data.Contains(",") && data.Contains("\n"))
         {
             return DataFormat.Csv;
         }
-        
+
         // Padrão é texto
         return DataFormat.Text;
     }
-    
+
     // Método simplificado para formatar dados de texto para JSON
     static string FormatarDadosParaJson(string data)
     {
         Console.WriteLine("[FALLBACK] Formatando dados para JSON localmente");
-        
+
         // Verificar se os dados já estão em formato JSON
         if ((data.StartsWith("[") && data.EndsWith("]")) || (data.StartsWith("{") && data.EndsWith("}")))
         {
@@ -769,26 +758,9 @@ class Agregador
             catch (JsonException)
             {
                 // Se não for um JSON válido, continuar com a conversão
-                Console.WriteLine("[FALLBACK] Dados parecem ser JSON mas são inválidos, tentando converter");
-                
-                // Tentar limpar o JSON inválido (remover escapes extras)
-                if (data.Contains("\\\""))
-                {
-                    try
-                    {
-                        data = data.Replace("\\\"", "\"");
-                        JsonDocument.Parse(data);
-                        Console.WriteLine("[FALLBACK] JSON corrigido após remover escapes extras");
-                        return data;
-                    }
-                    catch (JsonException)
-                    {
-                        Console.WriteLine("[FALLBACK] Falha ao corrigir JSON, continuando com a conversão");
-                    }
-                }
             }
         }
-        
+
         // Verificar se os dados contêm JSON escapado
         if (data.Contains("\\\"timestamp\\\"") || data.Contains("\\\"Hs\\\""))
         {
@@ -808,39 +780,39 @@ class Agregador
                 Console.WriteLine("[FALLBACK] Falha ao corrigir JSON escapado, continuando com a conversão");
             }
         }
-        
+
         // Criar uma lista para armazenar os resultados
         var resultados = new List<Dictionary<string, string>>();
-        
+
         // Dividir os dados em linhas e tratar possíveis delimitadores
         var linhas = data.Split(new[] { '\r', '\n', '|' }, StringSplitOptions.RemoveEmptyEntries);
-        
+
         foreach (var linha in linhas)
         {
             if (string.IsNullOrWhiteSpace(linha))
                 continue;
-                
+
             // Dividir a linha em valores
             var valores = linha.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-            
+
             if (valores.Length < 3)
                 continue;
-                
+
             var registro = new Dictionary<string, string>();
-            
+
             // Verificar se os dois primeiros valores formam uma data
             if (DateTime.TryParseExact(
-                $"{valores[0]} {valores[1]}", 
+                $"{valores[0]} {valores[1]}",
                 new[] { "yyyy-MM-dd HH:mm", "dd/MM/yyyy HH:mm" },
-                CultureInfo.InvariantCulture, 
-                DateTimeStyles.None, 
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
                 out var dataHora))
             {
                 // Formato: "2017-07-01 14:30 1.959 3.79 5.492 8.222 95 26.05"
                 registro["timestamp"] = dataHora.ToString("yyyy-MM-dd HH:mm");
-                
+
                 string[] colunas = { "Hs", "Hmax", "Tz", "Tp", "Direction", "SST" };
-                
+
                 for (int i = 0; i < Math.Min(valores.Length - 2, colunas.Length); i++)
                 {
                     registro[colunas[i]] = valores[i + 2];
@@ -850,28 +822,28 @@ class Agregador
             {
                 // Formato alternativo
                 registro["timestamp"] = valores[0];
-                
+
                 string[] colunas = { "Hs", "Hmax", "Tz", "Tp", "Direction", "SST" };
-                
+
                 for (int i = 0; i < Math.Min(valores.Length - 1, colunas.Length); i++)
                 {
                     registro[colunas[i]] = valores[i + 1];
                 }
             }
-            
+
             resultados.Add(registro);
         }
-        
+
         // Serializar para JSON com opções para evitar escape desnecessário
         var options = new JsonSerializerOptions
         {
             WriteIndented = false,
             Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
         };
-        
+
         return JsonSerializer.Serialize(resultados, options);
     }
-    
+
     // Método de fallback para converter texto para JSON quando o serviço RPC não está disponível
     static string ConverterTextParaJson(string data)
     {
@@ -891,20 +863,8 @@ class Agregador
                 Console.WriteLine("[CONVERTER] Dados parecem ser JSON mas são inválidos, tentando converter");
             }
         }
-        
+
         return FormatarDadosParaJson(data);
-    }
-    
-    static ReadingInterval ParseReadingInterval(string interval)
-    {
-        return interval.ToLower() switch
-        {
-            "segundo" or "second" => ReadingInterval.PerSecond,
-            "minuto" or "minute" => ReadingInterval.PerMinute,
-            "hora" or "hour" => ReadingInterval.PerHour,
-            "custom" => ReadingInterval.Custom,
-            _ => ReadingInterval.PerMinute // Intervalo padrão
-        };
     }
 
     static string RemoverVirgulas(string linhaCsv)
@@ -952,24 +912,138 @@ class Agregador
         }
     }
 
-    static async Task SendBufferedData(string ip, int port, string id)
+    static async Task SendBufferedData(string ip, int port, string id, string bufferKey = null)
     {
-        if (bufferWavy.ContainsKey(id) && bufferWavy[id].Count > 0)
+        // Se bufferKey for fornecido, usamos apenas os dados desse buffer específico
+        // Caso contrário, usamos todos os dados da WAVY (comportamento original)
+        Dictionary<string, List<string>> buffersToProcess = new();
+
+        if (bufferKey != null && bufferWavy.ContainsKey(bufferKey) && bufferWavy[bufferKey].Count > 0)
+        {
+            // Processar apenas o buffer específico (tópico específico)
+            buffersToProcess[bufferKey] = new List<string>(bufferWavy[bufferKey]);
+            Console.WriteLine($"[BUFFER] Preparando dados do buffer {bufferKey} para envio ao servidor");
+
+            // Construir dados combinados para este tópico
+            string topic = bufferKey.Split('_')[1];
+            var dataList = bufferWavy[bufferKey];
+
+            // Criar objeto anónimo para serialização
+            var dataToSend = new
+            {
+                wavy_id = id,
+                topic = topic,
+                records = dataList
+            };
+
+            string jsonCombinado = JsonSerializer.Serialize(dataToSend);
+            Console.WriteLine($"[AGREGADOR] Dados combinados: {jsonCombinado.Substring(0, Math.Min(200, jsonCombinado.Length))}...");
+
+            // Processar via RPC antes de enviar
+            Console.WriteLine($"[ENVIO] Enviando dados da WAVY {id} para processamento RPC, tópico: {topic}");
+
+            // Processar dados via RPC
+            try
+            {
+                if (rpcChannel != null)
+                {
+                    var client = new AGREGADOR.Greeter.GreeterClient(rpcChannel);
+                    Console.WriteLine($"[RPC] Enviando dados para processamento: {jsonCombinado.Substring(0, Math.Min(150, jsonCombinado.Length))}...");
+
+                    // Determinar o formato de destino a partir da configuração da WAVY
+                    var targetFormat = DataFormat.Json; // Padrão
+                    if (wavyConfigs.TryGetValue(id, out var config) && Enum.TryParse<DataFormat>(config.FormatoDestino, true, out var parsedFormat))
+                    {
+                        targetFormat = parsedFormat;
+                    }
+
+                    var request = new ProcessDataRequest
+                    {
+                        WavyId = id,
+                        Data = jsonCombinado,
+                        SourceFormat = DataFormat.Text, // Usar Text para que o RPC use o parser de contêiner JSON
+                        TargetFormat = targetFormat
+                    };
+
+                    var reply = await client.ProcessDataAsync(request);
+
+                    if (reply.Success)
+                    {
+                        Console.WriteLine("[RPC] Dados processados recebidos do servidor RPC");
+                        Console.WriteLine($"[RPC] Tipo de pré-processamento aplicado: {reply.PreprocessingApplied}");
+                        Console.WriteLine($"[RPC] Detalhes do pré-processamento:");
+                        Console.WriteLine($"  - Formato de origem: {request.SourceFormat}");
+                        Console.WriteLine($"  - Formato de destino: {request.TargetFormat}");
+                        if (wavyConfigs.ContainsKey(id))
+                        {
+                            Console.WriteLine($"  - Configuração da WAVY: {wavyConfigs[id].PreProcessamento}");
+                            Console.WriteLine($"  - Taxa de leitura: {wavyConfigs[id].TaxaLeitura}");
+                        }
+
+                        // Enviar dados processados para o servidor final
+                        Console.WriteLine($"[ENVIO FINAL] Enviando dados processados para servidor final {ip}");
+                        try
+                        {
+                            using TcpClient tcpClient = new TcpClient();
+
+                            // Definir timeout para conexão
+                            var connectTask = tcpClient.ConnectAsync(ip, port);
+                            if (await Task.WhenAny(connectTask, Task.Delay(5000)) != connectTask)
+                            {
+                                throw new TimeoutException("Tempo limite de conexão excedido");
+                            }
+
+                            using NetworkStream stream = tcpClient.GetStream();
+                            byte[] buffer = Encoding.UTF8.GetBytes(reply.ProcessedData);
+                            await stream.WriteAsync(buffer, 0, buffer.Length);
+                            Console.WriteLine($"[AGREGADOR] Dados de {id} para topico {topic} enviados com sucesso.");
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[ERRO] Falha ao enviar para servidor final: {ex.Message}");
+
+                            // Salvar dados em arquivo em caso de erro
+                            string filename = $"dados_processados/{id}_{topic}_erro_envio_{DateTime.Now:yyyyMMdd_HHmmss}.json";
+                            Directory.CreateDirectory("dados_processados");
+                            File.WriteAllText(filename, reply.ProcessedData);
+                            Console.WriteLine($"[INFO] Dados salvos em arquivo: {filename}");
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[ERRO RPC] Falha no processamento: {reply.ErrorMessage}");
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("[ERRO] Canal RPC não disponível");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ERRO] Falha ao processar via RPC: {ex.Message}");
+            }
+
+            // Limpar o buffer após processamento
+            bufferWavy[bufferKey].Clear();
+            return;
+        }
+        else if (bufferWavy.ContainsKey(id) && bufferWavy[id].Count > 0)
         {
             Console.WriteLine($"[BUFFER] Preparando dados da WAVY {id} para envio ao servidor");
-            
+
             // Tratamento especial para WAVY01 - Solução direta para o problema de dupla serialização
             if (id.ToLower() == "wavy01")
             {
                 // Criar dados diretamente no formato correto
                 var dadosWavy01 = new List<Dictionary<string, string>>();
-                
+
                 // Imprimir o conteúdo do buffer para depuração
                 Console.WriteLine("[DEBUG] Conteúdo do buffer WAVY01:");
                 foreach (var linha in bufferWavy[id])
                 {
                     Console.WriteLine($"[DEBUG] Linha: {linha}");
-                    
+
                     // Verificar se a linha já está em formato JSON
                     if (linha.StartsWith("[") && linha.EndsWith("]"))
                     {
@@ -978,7 +1052,7 @@ class Agregador
                             // Tentar usar o JSON diretamente
                             JsonDocument doc = JsonDocument.Parse(linha);
                             Console.WriteLine("[DEBUG] Linha já é um JSON válido, processando elementos");
-                            
+
                             // Extrair os elementos do array JSON e adicionar ao dadosWavy01
                             JsonElement root = doc.RootElement;
                             if (root.ValueKind == JsonValueKind.Array)
@@ -990,8 +1064,8 @@ class Agregador
                                         var registro = new Dictionary<string, string>();
                                         foreach (JsonProperty prop in element.EnumerateObject())
                                         {
-                                           registro[prop.Name] = prop.Value.ToString();
-                                         }
+                                            registro[prop.Name] = prop.Value.ToString();
+                                        }
                                         dadosWavy01.Add(registro);
                                         Console.WriteLine("[DEBUG] Registro JSON adicionado ao buffer");
                                     }
@@ -1005,11 +1079,36 @@ class Agregador
                             Console.WriteLine("[DEBUG] Linha parece ser JSON mas é inválida");
                         }
                     }
-                    
+
+                    try
+                    {
+                        // Tentar processar como JSON formatado
+                        var jsonData = JsonSerializer.Deserialize<JsonElement>(linha);
+                        if (jsonData.ValueKind == JsonValueKind.Object)
+                        {
+                            var registro = new Dictionary<string, string>();
+                            foreach (JsonProperty prop in jsonData.EnumerateObject())
+                            {
+                                // Não incluir timestamp se estiver processando dados de um tópico específico
+                                if (prop.Name == "topic" && prop.Value.GetString() == "Hs")
+                                {
+                                    Console.WriteLine("[DEBUG] Encontrado tópico Hs, garantindo que não contém timestamp incorreto");
+                                }
+                                registro[prop.Name] = prop.Value.ToString();
+                            }
+                            dadosWavy01.Add(registro);
+                            continue;
+                        }
+                    }
+                    catch
+                    {
+                        // Continuar com outras tentativas de parsing
+                    }
+
                     // Extrair os dados da linha
                     var partes = linha.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
                     Console.WriteLine($"[DEBUG] Número de partes: {partes.Length}");
-                    
+
                     if (partes.Length >= 8)
                     {
                         var registro = new Dictionary<string, string>
@@ -1038,13 +1137,13 @@ class Agregador
                                 {
                                     ["timestamp"] = $"{partes[0]} {partes[1]}"
                                 };
-                                
+
                                 string[] colunas = { "Hs", "Hmax", "Tz", "Tp", "Direction", "SST" };
                                 for (int i = 0; i < Math.Min(partes.Length - 2, colunas.Length); i++)
                                 {
                                     registro[colunas[i]] = partes[i + 2];
                                 }
-                                
+
                                 dadosWavy01.Add(registro);
                                 Console.WriteLine("[DEBUG] Registro processado com formato alternativo");
                             }
@@ -1055,28 +1154,28 @@ class Agregador
                         }
                     }
                 }
-                
+
                 // Verificar se temos dados para enviar
                 if (dadosWavy01.Count == 0)
                 {
                     Console.WriteLine("[AVISO] Nenhum dado válido encontrado para WAVY01");
-                    
+
                     // Tentar processar o buffer completo como texto
                     string textoCompleto = string.Join(" | ", bufferWavy[id]);
                     Console.WriteLine($"[DEBUG] Tentando processar buffer completo: {textoCompleto.Substring(0, Math.Min(100, textoCompleto.Length))}...");
-                    
+
                     // Aplicar pré-processamento
                     string processado = PreProcessar(textoCompleto, "converter_text_json", id);
                     if (processado != null && processado.StartsWith("[") && processado.EndsWith("]"))
                     {
                         Console.WriteLine("[DEBUG] Pré-processamento gerou JSON válido");
-                        
+
                         try
                         {
                             // Tentar extrair os elementos do JSON processado
                             JsonDocument doc = JsonDocument.Parse(processado);
                             JsonElement root = doc.RootElement;
-                            
+
                             if (root.ValueKind == JsonValueKind.Array)
                             {
                                 foreach (JsonElement element in root.EnumerateArray())
@@ -1091,7 +1190,7 @@ class Agregador
                                         dadosWavy01.Add(registro);
                                     }
                                 }
-                                
+
                                 Console.WriteLine($"[DEBUG] Extraídos {dadosWavy01.Count} registros do JSON processado");
                             }
                         }
@@ -1101,39 +1200,113 @@ class Agregador
                         }
                     }
                 }
-                
+
                 // Se ainda não temos dados suficientes, retornar sem enviar
                 if (dadosWavy01.Count < GetVolume(id) && bufferWavy[id].Count < GetVolume(id))
                 {
                     Console.WriteLine($"[BUFFER] Dados insuficientes para WAVY01: {dadosWavy01.Count}/{GetVolume(id)}. Aguardando mais dados.");
                     return;
                 }
-                
-                // Serializar diretamente para JSON
-                var jsonOptions = new JsonSerializerOptions
+
+                // Processar dados via RPC antes de enviar
+                Console.WriteLine($"[ENVIO] Enviando dados da WAVY {id} para processamento RPC");
+
+                try
                 {
-                    WriteIndented = false,
-                    Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-                };
-                
-                string jsonContent = JsonSerializer.Serialize(dadosWavy01, jsonOptions);
-                Console.WriteLine($"[BUFFER] Dados formatados diretamente para JSON: {jsonContent.Substring(0, Math.Min(100, jsonContent.Length))}...");
-                Console.WriteLine($"[BUFFER] Enviando {dadosWavy01.Count} registros para o servidor");
-                
-                // Criar o objeto de mensagem para o servidor
-                var dadosParaEnviarWavy01 = new { type = "FORWARD", data = new { id, conteudo = jsonContent } };
-                
-                // Serializar a mensagem completa
-                string jsonWavy01 = JsonSerializer.Serialize(dadosParaEnviarWavy01, jsonOptions);
-                
-                // Enviar ao servidor
-                EnviarParaServidor(ip, port, jsonWavy01);
-                
+                    if (rpcChannel != null)
+                    {
+                        // Serializar diretamente para JSON
+                        var jsonOptions = new JsonSerializerOptions
+                        {
+                            WriteIndented = false,
+                            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+                        };
+
+                        string jsonContent = JsonSerializer.Serialize(dadosWavy01, jsonOptions);
+
+                        var client = new AGREGADOR.Greeter.GreeterClient(rpcChannel);
+                        var request = new ProcessDataRequest
+                        {
+                            WavyId = id,
+                            Data = jsonContent,
+                            SourceFormat = DataFormat.Json,
+                            TargetFormat = DataFormat.Json
+                        };
+
+                        var reply = await client.ProcessDataAsync(request);
+
+                        if (reply.Success)
+                        {
+                            Console.WriteLine("[RPC] Dados processados recebidos do servidor RPC");
+                            Console.WriteLine($"[RPC] Processamento bem-sucedido: {reply.ProcessedData.Substring(0, Math.Min(100, reply.ProcessedData.Length))}...");
+
+                            // Enviar dados processados para o servidor final
+                            Console.WriteLine($"[ENVIO FINAL] Enviando dados processados para servidor final {ip}");
+                            try
+                            {
+                                using TcpClient tcpClient = new TcpClient();
+                                var connectTask = tcpClient.ConnectAsync(ip, port);
+                                if (await Task.WhenAny(connectTask, Task.Delay(5000)) != connectTask)
+                                {
+                                    throw new TimeoutException("Tempo limite de conexão excedido");
+                                }
+
+                                using NetworkStream stream = tcpClient.GetStream();
+                                byte[] buffer = Encoding.UTF8.GetBytes(reply.ProcessedData);
+                                await stream.WriteAsync(buffer, 0, buffer.Length);
+                                Console.WriteLine($"[AGREGADOR] Dados de {id} enviados com sucesso.");
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"[ERRO] Falha ao enviar para servidor final: {ex.Message}");
+
+                                // Salvar dados em arquivo em caso de erro
+                                string filename = $"dados_processados/{id}_erro_envio_{DateTime.Now:yyyyMMdd_HHmmss}.json";
+                                Directory.CreateDirectory("dados_processados");
+                                File.WriteAllText(filename, reply.ProcessedData);
+                                Console.WriteLine($"[INFO] Dados salvos em arquivo: {filename}");
+                            }
+                        }
+                        else
+                        {
+                            Console.WriteLine($"[ERRO RPC] Falha no processamento: {reply.ErrorMessage}");
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine("[ERRO] Canal RPC não disponível");
+
+                        // Serializar diretamente para JSON e tentar enviar sem processamento RPC
+                        var jsonOptions = new JsonSerializerOptions
+                        {
+                            WriteIndented = false,
+                            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+                        };
+
+                        string jsonContent = JsonSerializer.Serialize(dadosWavy01, jsonOptions);
+                        Console.WriteLine($"[BUFFER] Dados formatados diretamente para JSON: {jsonContent.Substring(0, Math.Min(100, jsonContent.Length))}...");
+                        Console.WriteLine($"[BUFFER] Enviando {dadosWavy01.Count} registros para o servidor");
+
+                        // Criar o objeto de mensagem para o servidor
+                        var dadosParaEnviarWavy01 = new { type = "FORWARD", data = new { id, conteudo = jsonContent } };
+
+                        // Serializar a mensagem completa
+                        string jsonWavy01 = JsonSerializer.Serialize(dadosParaEnviarWavy01, jsonOptions);
+
+                        // Enviar ao servidor
+                        EnviarParaServidor(ip, port, jsonWavy01);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[ERRO] Falha ao processar via RPC: {ex.Message}");
+                }
+
                 // Limpar o buffer
                 bufferWavy[id].Clear();
                 return;
             }
-            
+
             // Processamento normal para outras WAVYs
             // Verificar se temos dados suficientes
             if (bufferWavy[id].Count < GetVolume(id))
@@ -1141,25 +1314,25 @@ class Agregador
                 Console.WriteLine($"[BUFFER] Dados insuficientes para {id}: {bufferWavy[id].Count}/{GetVolume(id)}. Aguardando mais dados.");
                 return;
             }
-            
+
             string conteudo = string.Join(" | ", bufferWavy[id]);
             Console.WriteLine($"[BUFFER] Processando {bufferWavy[id].Count} registros para {id}");
             bufferWavy[id].Clear();
 
             // Chamada gRPC para pré-processamento remoto
             string processedData = null;
-            
+
             // Verificar se devemos tentar usar o serviço gRPC
             bool useGrpc = false;
-            
+
             // Verificar rapidamente se o serviço está acessível
             using (var tcpClient = new TcpClient())
             {
                 try
                 {
                     var connectTask = tcpClient.ConnectAsync("localhost", 7177);
-                    var timeoutTask = Task.Delay(500); // Timeout curto para não atrasar muito
-                    
+                    var timeoutTask = Task.Delay(5000); // Timeout curto para não atrasar muito
+
                     if (await Task.WhenAny(connectTask, timeoutTask) == connectTask)
                     {
                         useGrpc = true;
@@ -1170,7 +1343,7 @@ class Agregador
                     // Ignorar erros e continuar sem gRPC
                 }
             }
-            
+
             if (useGrpc)
             {
                 try
@@ -1179,32 +1352,32 @@ class Agregador
                     {
                         ServerCertificateCustomValidationCallback = (message, cert, chain, errors) => true
                     };
-                    
+
                     // Configurar timeout mais curto para evitar bloqueios longos
                     var httpClient = new HttpClient(httpHandler)
                     {
                         Timeout = TimeSpan.FromSeconds(3)
                     };
-                    
-                    using var channel = Grpc.Net.Client.GrpcChannel.ForAddress("https://localhost:7177", 
-                        new Grpc.Net.Client.GrpcChannelOptions 
-                        { 
+
+                    using var channel = Grpc.Net.Client.GrpcChannel.ForAddress("https://localhost:7177",
+                        new Grpc.Net.Client.GrpcChannelOptions
+                        {
                             HttpHandler = httpHandler,
                             // Adicionar configurações de timeout para o canal gRPC
                             MaxReceiveMessageSize = 4 * 1024 * 1024, // 4MB
                             MaxSendMessageSize = 4 * 1024 * 1024     // 4MB
                         });
-                    
+
                     var grpcClient = new PreProcessingService.Protos.PreProcessing.PreProcessingClient(channel);
                     var preprocType = wavyConfigs.ContainsKey(id) ? wavyConfigs[id].PreProcessamento : "nenhum";
                     var grpcRequest = new PreProcessingService.Protos.PreProcessRequest { WavyId = id, RawData = conteudo };
-                    
+
                     // Usar um timeout para a chamada gRPC
                     var callOptions = new Grpc.Core.CallOptions(deadline: DateTime.UtcNow.AddSeconds(3));
                     var grpcResponse = grpcClient.PreProcess(grpcRequest, callOptions);
                     processedData = grpcResponse.ProcessedData;
-                    
-                    Console.WriteLine($"[INFO] Dados processados com sucesso pelo serviço gRPC para {id}");
+Console.WriteLine($"[PRE-PROCESSAMENTO] Tipo aplicado: {grpcResponse.PreprocessingApplied}");
+Console.WriteLine($"[INFO] Dados processados com sucesso pelo serviço gRPC para {id}");
                 }
                 catch (Exception ex)
                 {
@@ -1218,29 +1391,30 @@ class Agregador
             {
                 string preproc = wavyConfigs[id].PreProcessamento;
                 Console.WriteLine($"[BUFFER] Aplicando pré-processamento '{preproc}' para WAVY {id}");
-                
+
                 // Dados antes do pré-processamento
                 Console.WriteLine($"[BUFFER] Dados antes do pré-processamento: {conteudo.Substring(0, Math.Min(50, conteudo.Length))}...");
-                
+
                 conteudo = PreProcessar(conteudo, preproc, id);
-                
+
                 // Dados após o pré-processamento
                 Console.WriteLine($"[BUFFER] Dados após pré-processamento: {conteudo?.Substring(0, Math.Min(50, conteudo?.Length ?? 0))}...");
+                processedData = conteudo;
             }
 
             if (string.IsNullOrWhiteSpace(processedData))
             {
-                Console.WriteLine($"[ERRO] Conteúdo inválido após pré-processamento remoto para {id}");
+                Console.WriteLine($"[ERRO] Conteúdo inválido após pré-processamento para {id}");
                 return;
             }
 
-            Console.WriteLine($"[ENVIANDO PARA SERVIDOR] {id}: {conteudo.Substring(0, Math.Min(100, conteudo.Length))}...");
+            Console.WriteLine($"[ENVIANDO PARA SERVIDOR] {id}: {processedData.Substring(0, Math.Min(100, processedData.Length))}...");
 
             try
             {
                 // Verificar se o conteúdo já é um JSON válido
-                string jsonContent = conteudo;
-                
+                string jsonContent = processedData;
+
                 // Se o conteúdo já for um JSON válido e estiver no formato esperado, usá-lo diretamente
                 if (jsonContent.StartsWith("[") && jsonContent.EndsWith("]"))
                 {
@@ -1253,28 +1427,103 @@ class Agregador
                     catch (JsonException)
                     {
                         // Se não for JSON válido, converter para o formato esperado
-                        jsonContent = FormatarDadosParaJson(conteudo);
+                        jsonContent = FormatarDadosParaJson(processedData);
                         Console.WriteLine("[BUFFER] Convertendo para JSON");
                     }
                 }
                 else
                 {
                     // Se não for JSON, converter para o formato esperado
-                    jsonContent = FormatarDadosParaJson(conteudo);
+                    jsonContent = FormatarDadosParaJson(processedData);
                     Console.WriteLine("[BUFFER] Convertendo para JSON");
                 }
-                
-                // Criar o objeto de mensagem para o servidor
-                var dadosParaEnviarOutros = new { type = "FORWARD", data = new { id, conteudo = jsonContent } };
-                
-                var optionsOutros = new JsonSerializerOptions
+
+                // Processar dados via RPC antes de enviar
+                Console.WriteLine($"[ENVIO] Enviando dados da WAVY {id} para processamento RPC");
+
+                try
                 {
-                    WriteIndented = false,
-                    Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-                };
-                string jsonOutros = JsonSerializer.Serialize(dadosParaEnviarOutros, optionsOutros);
-                byte[] buffer = Encoding.UTF8.GetBytes(jsonOutros);
-                EnviarParaServidor(ip, port, jsonOutros);
+                    if (rpcChannel != null)
+                    {
+                        var client = new AGREGADOR.Greeter.GreeterClient(rpcChannel);
+                        var request = new ProcessDataRequest
+                        {
+                            WavyId = id,
+                            Data = jsonContent,
+                            SourceFormat = DataFormat.Json,
+                            TargetFormat = DataFormat.Json
+                        };
+
+                        var reply = await client.ProcessDataAsync(request);
+
+                        if (reply.Success)
+                        {
+                            string preproc = wavyConfigs.ContainsKey(id) ? wavyConfigs[id].PreProcessamento : "nenhum";
+                            Console.WriteLine($"[RPC] Dados processados recebidos do servidor RPC (Pré-processamento: {preproc})");
+                            Console.WriteLine($"[RPC] Processamento bem-sucedido: {reply.ProcessedData.Substring(0, Math.Min(100, reply.ProcessedData.Length))}...");
+
+                            // Enviar dados processados para o servidor final
+                            Console.WriteLine($"[ENVIO FINAL] Enviando dados processados para servidor final {ip}");
+                            try
+                            {
+                                using TcpClient tcpClient = new TcpClient();
+                                var connectTask = tcpClient.ConnectAsync(ip, port);
+                                if (await Task.WhenAny(connectTask, Task.Delay(5000)) != connectTask)
+                                {
+                                    throw new TimeoutException("Tempo limite de conexão excedido");
+                                }
+
+                                using NetworkStream stream = tcpClient.GetStream();
+                                byte[] buffer = Encoding.UTF8.GetBytes(reply.ProcessedData);
+                                await stream.WriteAsync(buffer, 0, buffer.Length);
+                                await stream.FlushAsync(); // Ensure all data is sent
+                                Console.WriteLine($"[AGREGADOR] Dados de {id} enviados com sucesso.");
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"[ERRO] Falha ao enviar para servidor final: {ex.Message}");
+
+                                // Salvar dados em arquivo em caso de erro
+                                string filename = $"dados_processados/{id}_erro_envio_{DateTime.Now:yyyyMMdd_HHmmss}.json";
+                                Directory.CreateDirectory("dados_processados");
+                                File.WriteAllText(filename, reply.ProcessedData);
+                                Console.WriteLine($"[INFO] Dados salvos em arquivo: {filename}");
+                            }
+                        }
+                        else
+                        {
+                            Console.WriteLine($"[ERRO RPC] Falha no processamento: {reply.ErrorMessage}");
+                        }
+                    }
+                    else
+                    {
+                        // Criar o objeto de mensagem para o servidor
+                        var dadosParaEnviarOutros = new { type = "FORWARD", data = new { id, conteudo = jsonContent } };
+
+                        var optionsOutros = new JsonSerializerOptions
+                        {
+                            WriteIndented = false,
+                            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+                        };
+                        string jsonOutros = JsonSerializer.Serialize(dadosParaEnviarOutros, optionsOutros);
+                        EnviarParaServidor(ip, port, jsonOutros);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[ERRO] Falha ao processar via RPC: {ex.Message}");
+
+                    // Criar o objeto de mensagem para o servidor e tentar envio direto em caso de falha
+                    var dadosParaEnviarOutros = new { type = "FORWARD", data = new { id, conteudo = jsonContent } };
+
+                    var optionsOutros = new JsonSerializerOptions
+                    {
+                        WriteIndented = false,
+                        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+                    };
+                    string jsonOutros = JsonSerializer.Serialize(dadosParaEnviarOutros, optionsOutros);
+                    EnviarParaServidor(ip, port, jsonOutros);
+                }
             }
             catch (Exception ex)
             {
@@ -1283,30 +1532,54 @@ class Agregador
         }
     }
 
-    static void EnviarParaServidor(string ip, int port, string json)
+    static async Task EnviarParaServidor(string ip, int port, string json)
     {
         try
         {
             byte[] buffer = Encoding.UTF8.GetBytes(json);
 
-            using TcpClient client = new TcpClient(ip, port);
+            Console.WriteLine($"[BUFFER] Tentando conectar ao servidor {ip}:{port}");
+
+            using TcpClient client = new TcpClient();
+
+            // Definir timeout para a conexão
+            var connectTask = client.ConnectAsync(ip, port);
+            if (await Task.WhenAny(connectTask, Task.Delay(5000)) != connectTask)
+            {
+                throw new TimeoutException("Tempo limite de conexão excedido");
+            }
+
+            // Se chegou aqui, a conexão foi estabelecida
             using NetworkStream stream = client.GetStream();
-            
+
             // Set a larger send buffer size to handle larger payloads
             client.SendBufferSize = 65536; // 64KB buffer size
-            
+
             // Log the size of the data being sent
             Console.WriteLine($"[BUFFER] Enviando {buffer.Length} bytes para o servidor {ip}:{port}");
-            
+
             // Send the data
-            stream.Write(buffer, 0, buffer.Length);
-            stream.Flush(); // Ensure all data is sent
-            
+            await stream.WriteAsync(buffer, 0, buffer.Length);
+            await stream.FlushAsync(); // Ensure all data is sent
+
             Console.WriteLine($"[BUFFER] Dados enviados com sucesso para o servidor {ip}:{port}");
         }
         catch (Exception ex)
         {
             Console.WriteLine($"[ERRO] Falha ao enviar dados para o servidor: {ex.Message}");
+
+            // Salvar dados em arquivo em caso de erro
+            try
+            {
+                string filename = $"dados_processados/erro_envio_{DateTime.Now:yyyyMMdd_HHmmss}.json";
+                Directory.CreateDirectory("dados_processados");
+                File.WriteAllText(filename, json);
+                Console.WriteLine($"[INFO] Dados salvos em arquivo: {filename}");
+            }
+            catch (Exception fileEx)
+            {
+                Console.WriteLine($"[ERRO] Não foi possível salvar os dados em arquivo: {fileEx.Message}");
+            }
         }
     }
 
@@ -1376,7 +1649,7 @@ class Agregador
             {
                 linhas = new List<string>(File.ReadAllLines("config_wavy.txt"));
             }
-            
+
             bool linhaAtualizada = false;
 
             for (int i = 0; i < linhas.Count; i++)
@@ -1395,25 +1668,274 @@ class Agregador
             }
 
             File.WriteAllLines("config_wavy.txt", linhas);
-            
+
             // Recarregar a configuração para garantir que está atualizada em memória
             RecarregarConfiguracaoWavy(wavyId);
         }
     }
+
+
+    // Envia os dados buffereados para processamento RPC e depois para o servidor
+    static void SendBufferedData(string wavyId, string bufferKey)
+    {
+        lock (bufferWavy)
+        {
+            if (!bufferWavy.ContainsKey(bufferKey) || bufferWavy[bufferKey].Count == 0)
+                return;
+
+            try
+            {
+                // Obter a configuração da WAVY
+                RecarregarConfiguracaoWavy(wavyId);
+                string serverIp = "127.0.0.1"; // IP padrão
+
+                if (wavyConfigs.ContainsKey(wavyId) && !string.IsNullOrEmpty(wavyConfigs[wavyId].ServidorAssociado))
+                    serverIp = wavyConfigs[wavyId].ServidorAssociado;
+
+                // Criar um array JSON com todos os dados
+                var dataList = bufferWavy[bufferKey];
+                string topic = bufferKey.Split('_')[1]; // Extrair o tópico do bufferKey
+
+                // Montar um JSON no formato de array para armazenar todos os registros
+                StringBuilder jsonBuilder = new StringBuilder();
+                jsonBuilder.Append("{\n");
+                jsonBuilder.Append($"  \"wavy_id\": \"{wavyId}\",\n");
+                jsonBuilder.Append($"  \"topic\": \"{topic}\",\n");
+                jsonBuilder.Append($"  \"timestamp\": \"{DateTime.Now:yyyy-MM-dd HH:mm:ss}\",\n");
+                jsonBuilder.Append("  \"records\": [\n");
+
+                for (int i = 0; i < dataList.Count; i++)
+                {
+                    jsonBuilder.Append("    \"");
+                    jsonBuilder.Append(JsonEncodedText.Encode(dataList[i]));
+                    jsonBuilder.Append("\"");
+                    if (i < dataList.Count - 1)
+                        jsonBuilder.Append(",");
+                    jsonBuilder.Append("\n");
+                }
+
+                jsonBuilder.Append("  ]\n");
+                jsonBuilder.Append("}");
+
+                string combinedData = jsonBuilder.ToString();
+                Console.WriteLine($"[AGREGADOR] Dados combinados: {combinedData.Substring(0, Math.Min(200, combinedData.Length))}...");
+
+                // Aplicar pré-processamento conforme configurado
+                string preproc = wavyConfigs.ContainsKey(wavyId) ? wavyConfigs[wavyId].PreProcessamento : "nenhum";
+                string processedData = PreProcessar(combinedData, preproc, wavyId);
+
+                if (processedData == null)
+                {
+                    Console.WriteLine($"[ERRO] Dados inválidos após pré-processamento para WAVY {wavyId}");
+                    bufferWavy[bufferKey].Clear();
+                    return;
+                }
+
+                // Enviar para o servidor via RPC
+                SendToServer(serverIp, processedData, wavyId, bufferKey.Split('_')[1]); // Extrair o tópico do bufferKey
+
+                // Limpar o buffer após envio
+                bufferWavy[bufferKey].Clear();
+                Console.WriteLine($"[AGREGADOR] Dados de {wavyId} para tópico {bufferKey.Split('_')[1]} enviados com sucesso.");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ERRO] Falha ao enviar dados para {wavyId}: {ex.Message}");
+                // Manter os dados no buffer para tentar novamente mais tarde?
+                // ou limpar para evitar acúmulo?
+                bufferWavy[bufferKey].Clear();
+            }
+        }
+    }
+
+    // Envia dados para o servidor RPC e depois para o servidor final
+    static void SendToServer(string serverIp, string processedData, string wavyId, string topic)
+    {
+        try
+        {
+            Console.WriteLine($"[ENVIO] Enviando dados da WAVY {wavyId} para processamento RPC, tópico: {topic}");
+
+            // Fluxo completo: 
+            // 1. Enviar para RPC
+            // 2. Receber dados processados
+            // 3. Enviar para servidor final
+
+            if (rpcChannel != null)
+            {
+                var client = new AGREGADOR.Greeter.GreeterClient(rpcChannel);
+
+                // Usar o serviço ProcessData para processamento
+                Task.Run(async () =>
+                {
+                    try
+                    {
+                        Console.WriteLine($"[RPC] Enviando dados para processamento: {processedData.Substring(0, Math.Min(100, processedData.Length))}...");
+
+                        // Obter o formato de destino da configuração da WAVY
+                        string targetFormatString = wavyConfigs.ContainsKey(wavyId) ? wavyConfigs[wavyId].FormatoDados : "json";
+                        DataFormat targetFormat = ParseDataFormat(targetFormatString);
+
+                        // Usar o método ProcessData existente
+                        var request = new ProcessDataRequest
+                        {
+                            WavyId = wavyId,
+                            Data = processedData, // `processedData` já é o JSON combinado
+                            SourceFormat = DataFormat.Text, // O formato original é texto simples
+                            TargetFormat = targetFormat // O formato de destino é definido na configuração
+                        };
+
+                        // PASSO 1: Enviar para o servidor RPC e AGUARDAR a resposta
+                        var rpcReply = await client.ProcessDataAsync(request);
+                        Console.WriteLine($"[RPC] Dados processados recebidos do servidor RPC");
+
+                        // PASSO 2: Verificar se o processamento foi bem-sucedido
+                        if (rpcReply.Success)
+                        {
+                            string processedResult = rpcReply.ProcessedData;
+                            string preproc = wavyConfigs.ContainsKey(wavyId) ? wavyConfigs[wavyId].PreProcessamento : "nenhum";
+                            Console.WriteLine($"[RPC] Dados processados recebidos do servidor RPC (Pré-processamento: {preproc})");
+                            Console.WriteLine($"[RPC] Processamento bem-sucedido: {processedResult.Substring(0, Math.Min(100, processedResult.Length))}...");
+
+                            // PASSO 3: Enviar os dados processados para o servidor final
+                            await SendToFinalServer(serverIp, processedResult, wavyId, topic);
+                        }
+                        else
+                        {
+                            Console.WriteLine($"[ERRO RPC] Processamento falhou: {rpcReply.ErrorMessage}");
+
+                            // Salvar dados originais em arquivo como backup
+                            SaveToFile(wavyId, topic, processedData, "rpc_falha");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[ERRO RPC] Falha na comunicação com servidor RPC: {ex.Message}");
+
+                        // Em caso de erro no RPC, salvar os dados e tentar enviar direto para o servidor final
+                        SaveToFile(wavyId, topic, processedData, "rpc_erro");
+
+                        // Tentar enviar os dados originais diretamente para o servidor final
+                        await SendToFinalServer(serverIp, processedData, wavyId, topic);
+                    }
+                });
+            }
+            else
+            {
+                Console.WriteLine("[AVISO] Canal RPC não disponível. Tentando enviar direto para o servidor final...");
+
+                // Se o RPC não estiver disponível, tentar enviar os dados originais diretamente
+                Task.Run(async () =>
+                {
+                    await SendToFinalServer(serverIp, processedData, wavyId, topic);
+                });
+
+                // Também salvar uma cópia em arquivo
+                SaveToFile(wavyId, topic, processedData, "sem_rpc");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ERRO] Falha geral ao enviar dados: {ex.Message}");
+            SaveToFile(wavyId, topic, processedData, "erro_geral");
+        }
+    }
+
+    static ReadingInterval MapRate(string taxa) => taxa?.ToLower() switch
+    {
+        "original" => ReadingInterval.PerSecond,
+        "segundo" => ReadingInterval.PerSecond,
+        "minuto"  => ReadingInterval.PerMinute,
+        "hora"    => ReadingInterval.PerHour,
+        _         => ReadingInterval.PerSecond
+    };
+
+    // Método auxiliar para salvar dados em arquivo
+    static void SaveToFile(string wavyId, string topic, string data, string status)
+    {
+        try
+        {
+            string dataDir = "dados_processados";
+            if (!Directory.Exists(dataDir))
+                Directory.CreateDirectory(dataDir);
+
+            string fileName = $"{dataDir}/{wavyId}_{topic}_{status}_{DateTime.Now:yyyyMMdd_HHmmss}.json";
+            File.WriteAllText(fileName, data);
+            Console.WriteLine($"[INFO] Dados salvos em arquivo: {fileName}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ERRO] Falha ao salvar dados em arquivo: {ex.Message}");
+        }
+    }
+
+    // Método para enviar dados ao servidor final via TCP
+    static async Task SendToFinalServer(string serverIp, string data, string wavyId, string topic, int serverPort = 6000)
+    {
+        // The using statement ensures the TcpClient is disposed even if exceptions occur.
+        using (var tcpClient = new TcpClient())
+        {
+            try
+            {
+                Console.WriteLine($"[ENVIO FINAL] Tentando conectar a {serverIp}:{serverPort}...");
+
+                var connectTask = tcpClient.ConnectAsync(serverIp, serverPort);
+                if (await Task.WhenAny(connectTask, Task.Delay(5000)) == connectTask)
+                {
+                    await connectTask; // Propagate exceptions here.
+                }
+                else
+                {
+                    throw new TimeoutException($"Timeout (5s) ao conectar em {serverIp}:{serverPort}");
+                }
+
+                if (!tcpClient.Connected)
+                {
+                    throw new SocketException((int)SocketError.NotConnected);
+                }
+
+                Console.WriteLine($"[ENVIO FINAL] Conexão estabelecida com {serverIp}:{serverPort}. Enviando dados...");
+                using (NetworkStream stream = tcpClient.GetStream())
+                {
+                    byte[] buffer = Encoding.UTF8.GetBytes(data + "\n");
+                    await stream.WriteAsync(buffer, 0, buffer.Length);
+                    await stream.FlushAsync();
+                    Console.WriteLine($"[ENVIO FINAL] Dados enviados com sucesso para {serverIp}:{serverPort}");
+                }
+            }
+            catch (TimeoutException ex)
+            {
+                Console.WriteLine($"[ERRO CONEXÃO] {ex.Message}");
+                SaveToFile(wavyId, topic, data, "erro_timeout");
+            }
+            catch (SocketException ex) when (ex.SocketErrorCode == SocketError.NotConnected)
+            {
+                Console.WriteLine($"[ERRO CONEXÃO] Não foi possível conectar ao servidor final (socket não conectado) em {serverIp}:{serverPort}.");
+                SaveToFile(wavyId, topic, data, "erro_nao_conectado");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ERRO] Falha ao enviar para servidor final TCP: {ex.Message}\nVerifique se o servidor está rodando e ouvindo na porta correta.");
+                SaveToFile(wavyId, topic, data, "erro_envio");
+            }
+        }
+    }
+
+    class WavyConfig
+    {
+        public string PreProcessamento { get; set; }
+        public int VolumeDadosEnviar { get; set; }
+        public string ServidorAssociado { get; set; }
+        public string FormatoDados { get; set; } = "text"; // Formato padrão: text, csv, xml, json
+        public string FormatoDestino { get; set; } = "json"; // Formato de destino para o pré-processamento
+        public string TaxaLeitura { get; set; } = "minuto"; // Taxa padrão: segundo, minuto, hora, custom
+    }
+
+    class WavyStatus
+    {
+        public string Status { get; set; }
+        public List<string> DataTypes { get; set; }
+        public DateTime LastSync { get; set; }
+    }
 }
 
-class WavyConfig
-{
-    public string PreProcessamento { get; set; }
-    public int VolumeDadosEnviar { get; set; }
-    public string ServidorAssociado { get; set; }
-    public string FormatoDados { get; set; } = "text"; // Formato padrão: text, csv, xml, json
-    public string TaxaLeitura { get; set; } = "minuto"; // Taxa padrão: segundo, minuto, hora, custom
-}
-
-class WavyStatus
-{
-    public string Status { get; set; }
-    public List<string> DataTypes { get; set; }
-    public DateTime LastSync { get; set; }
-}
+// Nenhuma classe adicional necessária, usando ProcessDataRequest existente

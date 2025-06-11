@@ -1,21 +1,24 @@
 syntax = "proto3";
+import "greet.proto";
 
 option csharp_namespace = "PreProcessingService.Protos";
 
 package preprocessing;
 
-// Mensagem para enviar dados para pr�-processamento
+// Mensagem para enviar dados para pré-processamento
 message PreProcessRequest {
   string wavy_id = 1;
   string raw_data = 2; // Dados agregados (texto, CSV, XML, JSON, etc)
+  greet.ReadingInterval target_rate = 3; // nova opção de uniformização
 }
 
 // Mensagem de resposta com dados uniformizados
 message PreProcessResponse {
   string processed_data = 1; // Dados prontos para envio ao servidor TCP
+  string preprocessing_applied = 2; // Tipo de pré-processamento aplicado
 }
 
-// Servi�o de pr�-processamento
+// Serviço de pré-processamento
 service PreProcessing {
   rpc PreProcess (PreProcessRequest) returns (PreProcessResponse);
 }

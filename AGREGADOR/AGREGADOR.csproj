@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
 		<OutputType>Exe</OutputType>
@@ -17,17 +17,9 @@
 		<PackageReference Include="RabbitMQ.Client" Version="6.2.2" />
 	</ItemGroup>
 
-	<ItemGroup>
-		<None Update="Protos\greet.proto">
-			<GrpcServices>Server</GrpcServices>
-		</None>
-		<None Update="Protos\preprocessing.proto">
-			<GrpcServices>Client</GrpcServices>
-		</None>
-	</ItemGroup>
 
 	<ItemGroup>
-		<Protobuf Include="Protos\greet.proto" GrpcServices="Client" />
-		<Protobuf Include="Protos\preprocessing.proto" GrpcServices="Client" />
+		<Protobuf Include="Protos\greet.proto" GrpcServices="Client" ProtoRoot="Protos" />
+		<Protobuf Include="Protos\preprocessing.proto" GrpcServices="Client" ProtoRoot="Protos" />
 	</ItemGroup>
 </Project>

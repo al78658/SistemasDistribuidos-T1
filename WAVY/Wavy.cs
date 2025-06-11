@@ -282,10 +282,11 @@ class Wavy
                     Thread.Sleep(delay);
 
                     string[] valores = line.Split(',');
-                    for (int j = 0; j < tipos.Length && j < valores.Length; j++)
+                    // Skip the first column (date/time) and start from index 1
+                    for (int j = 0; j < tipos.Length && j + 1 < valores.Length; j++)
                     {
                         string topic = tipos[j];
-                        string mensagem = valores[j];
+                        string mensagem = valores[j + 1]; // Use j + 1 to skip the date/time column
                         var body = Encoding.UTF8.GetBytes(mensagem);
                         channel.BasicPublish(exchange: "wavy_data",
                                             routingKey: topic,
