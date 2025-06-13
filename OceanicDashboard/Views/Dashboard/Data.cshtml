@@ -1,0 +1,112 @@
+@model OceanicDashboard.Controllers.DataViewModel
+@{
+    ViewData["Title"] = "Dados Oceânicos";
+}
+
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h4 class="card-title">@ViewData["Title"]</h4>
+                </div>
+                <div class="card-body">
+                    <!-- Filtros -->
+                    <form method="get" class="row g-3 mb-4">
+                        <div class="col-md-3">
+                            <label for="wavyId" class="form-label">Wavy ID</label>
+                            <input type="text" class="form-control" id="wavyId" name="wavyId" value="@Model.WavyId">
+                        </div>
+                        <div class="col-md-3">
+                            <label for="fromDate" class="form-label">Data Inicial</label>
+                            <input type="datetime-local" class="form-control" id="fromDate" name="fromDate" 
+                                   value="@(Model.FromDate?.ToString("yyyy-MM-ddTHH:mm"))">
+                        </div>
+                        <div class="col-md-3">
+                            <label for="toDate" class="form-label">Data Final</label>
+                            <input type="datetime-local" class="form-control" id="toDate" name="toDate" 
+                                   value="@(Model.ToDate?.ToString("yyyy-MM-ddTHH:mm"))">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">&nbsp;</label>
+                            <div>
+                                <button type="submit" class="btn btn-primary">Filtrar</button>
+                                <a href="/Dashboard/Data" class="btn btn-secondary">Limpar</a>
+                            </div>
+                        </div>
+                    </form>
+
+                    <!-- Tabela de Dados -->
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover">
+                            <thead class="table-dark">
+                                <tr>
+                                    <th>Wavy ID</th>
+                                    <th>Timestamp</th>
+                                    <th>Hs (m)</th>
+                                    <th>Hmax (m)</th>
+                                    <th>Tz (s)</th>
+                                    <th>Tp (s)</th>
+                                    <th>SST (°C)</th>
+                                    <th>Recebido em</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var item in Model.Data)
+                                {
+                                    <tr>
+                                        <td>@item.WavyId</td>
+                                        <td>@item.Timestamp.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                                        <td>@(item.Hs?.ToString("F2") ?? "-")</td>
+                                        <td>@(item.Hmax?.ToString("F2") ?? "-")</td>
+                                        <td>@(item.Tz?.ToString("F2") ?? "-")</td>
+                                        <td>@(item.Tp?.ToString("F2") ?? "-")</td>
+                                        <td>@(item.SST?.ToString("F2") ?? "-")</td>
+                                        <td>@item.ReceivedAt.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+
+                    @if (!Model.Data.Any())
+                    {
+                        <div class="alert alert-info text-center" role="alert">
+                            <i class="bi bi-info-circle"></i>
+                            Nenhum dado encontrado para os filtros aplicados.
+                        </div>
+                    }
+
+                    <!-- Paginação -->
+                    @if (Model.TotalRecords > Model.PageSize)
+                    {
+                        <nav aria-label="Navegação de páginas">
+                            <ul class="pagination justify-content-center">
+                                @if (Model.CurrentPage > 1)
+                                {
+                                    <li class="page-item">
+                                        <a class="page-link" href="?page=@(Model.CurrentPage - 1)&wavyId=@Model.WavyId&fromDate=@Model.FromDate&toDate=@Model.ToDate">Anterior</a>
+                                    </li>
+                                }
+                                
+                                @for (int i = Math.Max(1, Model.CurrentPage - 2); i <= Math.Min(Model.CurrentPage + 2, (int)Math.Ceiling((double)Model.TotalRecords / Model.PageSize)); i++)
+                                {
+                                    <li class="page-item @(i == Model.CurrentPage ? "active" : "")">
+                                        <a class="page-link" href="?page=@i&wavyId=@Model.WavyId&fromDate=@Model.FromDate&toDate=@Model.ToDate">@i</a>
+                                    </li>
+                                }
+                                
+                                @if (Model.CurrentPage < Math.Ceiling((double)Model.TotalRecords / Model.PageSize))
+                                {
+                                    <li class="page-item">
+                                        <a class="page-link" href="?page=@(Model.CurrentPage + 1)&wavyId=@Model.WavyId&fromDate=@Model.FromDate&toDate=@Model.ToDate">Próximo</a>
+                                    </li>
+                                }
+                            </ul>
+                        </nav>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

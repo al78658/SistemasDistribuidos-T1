@@ -116,13 +116,14 @@ class Agregador
                 // Armazenar a mensagem formatada em JSON
                 bufferWavy[bufferKey].Add(formattedMessage);
 
+                Console.WriteLine($"[FLUXO PASSO 1] WAVY→AGREGADOR: Recebido {topic} da {wavyId}");
                 Console.WriteLine($"[BUFFER] Adicionado ao buffer {bufferKey}: {formattedMessage}. Total: {bufferWavy[bufferKey].Count}");
                 Thread.Sleep(1000); // Pausa de 1 segundo para visualizar a chegada de cada mensagem
 
                 // Verificar se atingiu o volume necessário para enviar
                 if (bufferWavy[bufferKey].Count >= GetVolume(wavyId))
                 {
-                    Console.WriteLine($"[AGREGADOR] Buffer de {wavyId} para {topic} atingiu volume {bufferWavy[bufferKey].Count}. Enviando para processamento...");
+                    Console.WriteLine($"[FLUXO PASSO 2] AGREGADOR→PreProcessing: Buffer de {wavyId} para {topic} atingiu volume {bufferWavy[bufferKey].Count}. Enviando para pré-processamento...");
                     // Passa o servidor associado da WAVY para utilizar a porta correta
                     string serverIp = "127.0.0.1";
                     int serverPort = 6000; // Porta do servidor final ajustada para 6000
@@ -940,15 +941,13 @@ class Agregador
             Console.WriteLine($"[AGREGADOR] Dados combinados: {jsonCombinado.Substring(0, Math.Min(200, jsonCombinado.Length))}...");
 
             // Processar via RPC antes de enviar
-            Console.WriteLine($"[ENVIO] Enviando dados da WAVY {id} para processamento RPC, tópico: {topic}");
-
-            // Processar dados via RPC
+            Console.WriteLine($"[ENVIO] Enviando dados da WAVY {id} para processamento RPC, tópico: {topic}");            // Processar dados via RPC
             try
             {
                 if (rpcChannel != null)
                 {
                     var client = new AGREGADOR.Greeter.GreeterClient(rpcChannel);
-                    Console.WriteLine($"[RPC] Enviando dados para processamento: {jsonCombinado.Substring(0, Math.Min(150, jsonCombinado.Length))}...");
+                    Console.WriteLine($"[FLUXO PASSO 2] AGREGADOR→PreProcessing: Enviando para pré-processamento RPC: {jsonCombinado.Substring(0, Math.Min(150, jsonCombinado.Length))}...");
 
                     // Determinar o formato de destino a partir da configuração da WAVY
                     var targetFormat = DataFormat.Json; // Padrão
@@ -969,7 +968,7 @@ class Agregador
 
                     if (reply.Success)
                     {
-                        Console.WriteLine("[RPC] Dados processados recebidos do servidor RPC");
+                        Console.WriteLine("[FLUXO PASSO 3] PreProcessing→AGREGADOR: Dados processados recebidos do pré-processamento RPC");
                         Console.WriteLine($"[RPC] Tipo de pré-processamento aplicado: {reply.PreprocessingApplied}");
                         Console.WriteLine($"[RPC] Detalhes do pré-processamento:");
                         Console.WriteLine($"  - Formato de origem: {request.SourceFormat}");
@@ -981,7 +980,7 @@ class Agregador
                         }
 
                         // Enviar dados processados para o servidor final
-                        Console.WriteLine($"[ENVIO FINAL] Enviando dados processados para servidor final {ip}");
+                        Console.WriteLine($"[FLUXO PASSO 4] AGREGADOR→SERVIDOR: Enviando dados pré-processados para servidor TCP {ip}:{port}");
                         try
                         {
                             using TcpClient tcpClient = new TcpClient();
@@ -996,7 +995,7 @@ class Agregador
                             using NetworkStream stream = tcpClient.GetStream();
                             byte[] buffer = Encoding.UTF8.GetBytes(reply.ProcessedData);
                             await stream.WriteAsync(buffer, 0, buffer.Length);
-                            Console.WriteLine($"[AGREGADOR] Dados de {id} para topico {topic} enviados com sucesso.");
+                            Console.WriteLine($"[FLUXO PASSO 4] ✓ AGREGADOR→SERVIDOR: Dados de {id} para tópico {topic} enviados com sucesso para o servidor TCP.");
                         }
                         catch (Exception ex)
                         {
@@ -1191,7 +1190,7 @@ class Agregador
                                     }
                                 }
 
-                                Console.WriteLine($"[DEBUG] Extraídos {dadosWavy01.Count} registros do JSON processado");
+                                Console.WriteLine($"[DEBUG] Extraídos {dadosWavy01.Count} registos do JSON processado");
                             }
                         }
                         catch (JsonException ex)
@@ -1285,7 +1284,7 @@ class Agregador
 
                         string jsonContent = JsonSerializer.Serialize(dadosWavy01, jsonOptions);
                         Console.WriteLine($"[BUFFER] Dados formatados diretamente para JSON: {jsonContent.Substring(0, Math.Min(100, jsonContent.Length))}...");
-                        Console.WriteLine($"[BUFFER] Enviando {dadosWavy01.Count} registros para o servidor");
+                        Console.WriteLine($"[BUFFER] Enviando {dadosWavy01.Count} registos para o servidor");
 
                         // Criar o objeto de mensagem para o servidor
                         var dadosParaEnviarWavy01 = new { type = "FORWARD", data = new { id, conteudo = jsonContent } };
@@ -1316,7 +1315,7 @@ class Agregador
             }
 
             string conteudo = string.Join(" | ", bufferWavy[id]);
-            Console.WriteLine($"[BUFFER] Processando {bufferWavy[id].Count} registros para {id}");
+            Console.WriteLine($"[BUFFER] Processando {bufferWavy[id].Count} registos para {id}");
             bufferWavy[id].Clear();
 
             // Chamada gRPC para pré-processamento remoto
@@ -1696,7 +1695,7 @@ Console.WriteLine($"[INFO] Dados processados com sucesso pelo serviço gRPC para
                 var dataList = bufferWavy[bufferKey];
                 string topic = bufferKey.Split('_')[1]; // Extrair o tópico do bufferKey
 
-                // Montar um JSON no formato de array para armazenar todos os registros
+                // Montar um JSON no formato de array para armazenar todos os registos
                 StringBuilder jsonBuilder = new StringBuilder();
                 jsonBuilder.Append("{\n");
                 jsonBuilder.Append($"  \"wavy_id\": \"{wavyId}\",\n");

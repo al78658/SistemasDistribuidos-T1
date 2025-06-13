@@ -2,7 +2,7 @@ using AnalysisService.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Configurar Kestrel para HTTP/2 explícito
+// Configurar Kestrel para HTTP/2 e HTTP/1.1
 builder.WebHost.ConfigureKestrel(options =>
 {
     options.ListenAnyIP(7275, listenOptions =>

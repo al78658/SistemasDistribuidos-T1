@@ -1,0 +1,811 @@
+@{
+    Layout = "_Layout";
+}
+@model OceanicDashboard.Controllers.DashboardViewModel
+
+@{
+    ViewData["Title"] = "Dashboard";
+}
+
+<div class="row">
+    <div class="col-12">
+        <h1 class="mb-4">🌊 Monitorização Oceânica - Dashboard</h1>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card card-metric h-100">
+            <div class="card-body text-center">
+                <h5 class="card-title">WAVYs Ativas</h5>
+                <h2 class="display-4">@Model.TotalWavys</h2>
+                <small>Dispositivos monitorados</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card card-metric h-100">
+            <div class="card-body text-center">
+                <h5 class="card-title">Registros Totais</h5>
+                <h2 class="display-4">@Model.TotalRecords</h2>
+                <small>Dados coletados</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card card-metric h-100">
+            <div class="card-body text-center">
+                <h5 class="card-title">Análises</h5>
+                <h2 class="display-4">@Model.RecentAnalyses.Count</h2>
+                <small>Últimas análises</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card card-data h-100">
+            <div class="card-body text-center">
+                <h5 class="card-title">Última Atualização</h5>
+                <h6>@Model.LastUpdate.ToString("dd/MM/yyyy")</h6>
+                <small>@Model.LastUpdate.ToString("HH:mm:ss")</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-8">        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">📊 Dados das Ondas (Últimas 24h)</h5>
+            </div>
+            <div class="card-body">
+                <div id="waveChart" style="width:100%;height:400px;"></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">🔍 Últimas Análises</h5>
+            </div>
+            <div class="card-body">
+                @if (Model.RecentAnalyses.Any())
+                {
+                    <div class="list-group list-group-flush">
+                        @foreach (var analysis in Model.RecentAnalyses.Take(5))
+                        {
+                            <div class="list-group-item border-0 px-0">
+                                <div class="d-flex w-100 justify-content-between">
+                                    <h6 class="mb-1">@analysis.WavyId</h6>
+                                    <small>@analysis.AnalysisTimestamp.ToString("HH:mm")</small>
+                                </div>
+                                <p class="mb-1">
+                                    <span class="badge bg-primary">Média: @analysis.Mean.ToString("F2")</span>
+                                    <span class="badge bg-secondary">@analysis.Pattern</span>
+                                </p>
+                                <small>Desvio: @analysis.StandardDeviation.ToString("F2")</small>
+                            </div>
+                        }
+                    </div>                }
+                else
+                {
+                    <div class="text-center">
+                        <i class="fas fa-chart-line fa-2x text-muted mb-2"></i>
+                        <p class="text-muted">Nenhuma análise disponível</p>
+                        <small class="text-muted">As análises aparecerão após o processamento dos dados</small>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">📈 Dados Recentes</h5>
+            </div>
+            <div class="card-body">
+                @if (Model.RecentData.Any())
+                {
+                    <div class="table-responsive">
+                        <table class="table table-striped">
+                            <thead>
+                                <tr>
+                                    <th>WAVY ID</th>
+                                    <th>Timestamp</th>
+                                    <th>Hs (m)</th>
+                                    <th>Hmax (m)</th>
+                                    <th>Tz (s)</th>
+                                    <th>Tp (s)</th>
+                                    <th>SST (°C)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var data in Model.RecentData.Take(10))
+                                {
+                                    <tr>
+                                        <td><span class="badge bg-info">@data.WavyId</span></td>
+                                        <td>@data.Timestamp.ToString("dd/MM HH:mm:ss")</td>
+                                        <td>@(data.Hs?.ToString("F2") ?? "-")</td>
+                                        <td>@(data.Hmax?.ToString("F2") ?? "-")</td>
+                                        <td>@(data.Tz?.ToString("F2") ?? "-")</td>
+                                        <td>@(data.Tp?.ToString("F2") ?? "-")</td>
+                                        <td>@(data.SST?.ToString("F2") ?? "-")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="text-center">
+                        <a href="@Url.Action("Data", "Dashboard")" class="btn btn-ocean">Ver Todos os Dados</a>
+                    </div>                }
+                else
+                {
+                    <div class="text-center py-4">
+                        <div class="mb-3">
+                            <i class="fas fa-database fa-3x text-muted"></i>
+                        </div>
+                        <h5 class="text-muted">Nenhum dado disponível</h5>
+                        <p class="text-muted">
+                            Para ver dados no dashboard:
+                        </p>
+                        <ol class="text-start text-muted small">
+                            <li>Inicie o <strong>AnalysisService</strong></li>
+                            <li>Inicie o <strong>Servidor TCP</strong></li>
+                            <li>Execute a opção <strong>6 - Criar dados de teste</strong> no menu do servidor</li>
+                            <li>Recarregue esta página</li>
+                        </ol>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('🌊 Dashboard carregando...');
+            loadAndDisplayChart();
+        });
+
+        function loadAndDisplayChart() {
+            console.log('📊 Buscando dados...');
+            
+            // Mostrar indicador de carregamento
+            document.getElementById('waveChart').innerHTML = `
+                <div class="text-center p-4">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Carregando...</span>
+                    </div>
+                    <p class="mt-2 text-muted">Carregando dados...</p>
+                </div>
+            `;
+            
+            // Buscar dados do servidor
+            fetch('@Url.Action("GetChartData", "Dashboard")')
+                .then(response => {
+                    console.log('📡 Resposta recebida:', response.status, response.statusText);
+                    return response.text(); // Primeiro como texto para debug
+                })
+                .then(text => {
+                    console.log('📄 Resposta raw:', text);
+                    try {
+                        const data = JSON.parse(text);
+                        console.log('📈 Dados parseados:', data);
+                        displayChart(data);
+                    } catch (e) {
+                        console.error('❌ Erro ao parsear JSON:', e);
+                        showError(`Erro ao parsear dados: ${e.message}<br><strong>Resposta:</strong> ${text}`);
+                    }
+                })
+                .catch(error => {
+                    console.error('❌ Erro na requisição:', error);
+                    showError(`Erro na requisição: ${error.message}`);
+                });
+        }        function displayChart(data) {
+            console.log('🎨 Verificando dados recebidos:', data);
+            
+            // Verificar se há dados reais válidos
+            if (!data || data.length === 0) {
+                showNoDataMessage();
+                return;
+            }
+
+            // Verificar se há pelo menos um valor real (não nulo)
+            const hasValidData = data.some(d => 
+                (d.hs !== null && d.hs !== undefined) || 
+                (d.hmax !== null && d.hmax !== undefined) || 
+                (d.sst !== null && d.sst !== undefined) ||
+                (d.tp !== null && d.tp !== undefined) ||
+                (d.tz !== null && d.tz !== undefined)
+            );
+            
+            if (!hasValidData) {
+                showNoValidDataMessage(data.length);
+                return;
+            }
+
+            // Criar gráfico APENAS com dados reais
+            createRealDataChart(data);
+        }function createSimpleChart(data) {
+            console.log('📊 Criando gráfico simples com', data.length, 'registos');
+            
+            // Verificar todos os dados, não apenas os válidos
+            const allHs = data.map(d => d.hs);
+            const allHmax = data.map(d => d.hmax);
+            const allSST = data.map(d => d.sst);
+            
+            const validHs = data.filter(d => d.hs !== null && d.hs !== undefined);
+            const validHmax = data.filter(d => d.hmax !== null && d.hmax !== undefined);
+            const validSST = data.filter(d => d.sst !== null && d.sst !== undefined);
+            
+            console.log('📊 Debug valores:', {
+                totalRegistros: data.length,
+                validHs: validHs.length,
+                validHmax: validHmax.length,
+                validSST: validSST.length,
+                sampleData: data.slice(0, 3)
+            });
+
+            let chartHTML = `
+                <div class="p-3">
+                    
+                    <!-- Status e estatísticas -->
+                    <div class="row mb-3">
+                        <div class="col-md-12">
+                            <div class="alert alert-info">
+                                <strong>Status:</strong> ${data.length} registros encontrados<br>
+                                <strong>Valores válidos:</strong> 
+                                Hs: ${validHs.length} | 
+                                Hmax: ${validHmax.length} | 
+                                SST: ${validSST.length}
+                            </div>
+                        </div>
+                    </div>
+            `;
+
+            // Se há dados válidos, mostrar estatísticas
+            if (validHs.length > 0 || validHmax.length > 0 || validSST.length > 0) {
+                chartHTML += `<div class="row mb-3">`;
+
+                if (validHs.length > 0) {
+                    const hsValues = validHs.map(d => d.hs);
+                    const hsAvg = (hsValues.reduce((a, b) => a + b, 0) / hsValues.length).toFixed(2);
+                    const hsMax = Math.max(...hsValues).toFixed(2);
+                    const hsMin = Math.min(...hsValues).toFixed(2);
+                    chartHTML += `
+                        <div class="col-md-4">
+                            <div class="card border-info">
+                                <div class="card-body text-center">
+                                    <h6 class="card-title text-info">📏 Hs (Altura Significativa)</h6>
+                                    <p class="card-text">
+                                        <strong>Média:</strong> ${hsAvg}m<br>
+                                        <strong>Min/Max:</strong> ${hsMin}m / ${hsMax}m<br>
+                                        <small class="text-muted">${hsValues.length} amostras</small>
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                if (validHmax.length > 0) {
+                    const hmaxValues = validHmax.map(d => d.hmax);
+                    const hmaxAvg = (hmaxValues.reduce((a, b) => a + b, 0) / hmaxValues.length).toFixed(2);
+                    const hmaxMax = Math.max(...hmaxValues).toFixed(2);
+                    const hmaxMin = Math.min(...hmaxValues).toFixed(2);
+                    chartHTML += `
+                        <div class="col-md-4">
+                            <div class="card border-warning">
+                                <div class="card-body text-center">
+                                    <h6 class="card-title text-warning">📈 Hmax (Altura Máxima)</h6>
+                                    <p class="card-text">
+                                        <strong>Média:</strong> ${hmaxAvg}m<br>
+                                        <strong>Min/Max:</strong> ${hmaxMin}m / ${hmaxMax}m<br>
+                                        <small class="text-muted">${hmaxValues.length} amostras</small>
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                if (validSST.length > 0) {
+                    const sstValues = validSST.map(d => d.sst);
+                    const sstAvg = (sstValues.reduce((a, b) => a + b, 0) / sstValues.length).toFixed(1);
+                    const sstMax = Math.max(...sstValues).toFixed(1);
+                    const sstMin = Math.min(...sstValues).toFixed(1);
+                    chartHTML += `
+                        <div class="col-md-4">
+                            <div class="card border-success">
+                                <div class="card-body text-center">
+                                    <h6 class="card-title text-success">🌡️ SST (Temperatura)</h6>
+                                    <p class="card-text">
+                                        <strong>Média:</strong> ${sstAvg}°C<br>
+                                        <strong>Min/Max:</strong> ${sstMin}°C / ${sstMax}°C<br>
+                                        <small class="text-muted">${sstValues.length} amostras</small>
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                chartHTML += `</div>`;
+
+                // Gráfico simples com barras para últimos registros
+                const recentData = data.slice(-10);
+                if (recentData.length > 0) {
+                    chartHTML += `
+                        <h6>📈 Últimos ${recentData.length} Registros</h6>
+                        <div class="chart-container" style="max-height: 300px; overflow-y: auto;">
+                    `;
+
+                    recentData.forEach((d, index) => {
+                        const time = new Date(d.timestamp).toLocaleTimeString('pt-PT', {hour: '2-digit', minute: '2-digit'});
+                        
+                        chartHTML += `
+                            <div class="mb-3 p-2 border rounded">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <strong>${d.wavyId || 'N/A'}</strong>
+                                    <small class="text-muted">${time}</small>
+                                </div>
+                                <div class="row">
+                        `;
+
+                        // Mostrar valores ou placeholder
+                        const hsValue = d.hs !== null ? d.hs.toFixed(2) + 'm' : '---';
+                        const hmaxValue = d.hmax !== null ? d.hmax.toFixed(2) + 'm' : '---';
+                        const sstValue = d.sst !== null ? d.sst.toFixed(1) + '°C' : '---';
+                        const tpValue = d.tp !== null ? d.tp.toFixed(1) + 's' : '---';
+                        const tzValue = d.tz !== null ? d.tz.toFixed(1) + 's' : '---';
+
+                        chartHTML += `
+                                    <div class="col-2">
+                                        <small class="text-muted">Hs</small><br>
+                                        <span class="badge bg-info">${hsValue}</span>
+                                    </div>
+                                    <div class="col-2">
+                                        <small class="text-muted">Hmax</small><br>
+                                        <span class="badge bg-warning">${hmaxValue}</span>
+                                    </div>
+                                    <div class="col-2">
+                                        <small class="text-muted">SST</small><br>
+                                        <span class="badge bg-success">${sstValue}</span>
+                                    </div>
+                                    <div class="col-2">
+                                        <small class="text-muted">Tp</small><br>
+                                        <span class="badge bg-secondary">${tpValue}</span>
+                                    </div>
+                                    <div class="col-2">
+                                        <small class="text-muted">Tz</small><br>
+                                        <span class="badge bg-dark">${tzValue}</span>
+                                    </div>
+                                </div>
+                        `;
+
+                        if (d.rawData) {
+                            chartHTML += `
+                                <div class="mt-2">
+                                    <small class="text-muted">Raw:</small>
+                                    <code class="small">${d.rawData}</code>
+                                </div>
+                            `;
+                        }
+
+                        chartHTML += `</div>`;
+                    });
+
+                    chartHTML += `</div>`;
+                }
+            } else {
+                // Mostrar informações de debug quando não há dados válidos
+                chartHTML += `
+                    <div class="alert alert-warning">
+                        <h6>⚠️ Dados encontrados mas sem valores numéricos</h6>
+                        <p>Foram encontrados ${data.length} registos, mas todos os valores estão nulos.</p>
+                        <strong>Primeiros 3 registos para debug:</strong>
+                        <pre class="mt-2">${JSON.stringify(data.slice(0, 3), null, 2)}</pre>
+                    </div>
+                `;
+            }
+
+            chartHTML += `
+                    <!-- Debug completo -->
+                    <div class="mt-3">
+                        <button class="btn btn-sm btn-outline-secondary" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none'">
+                            🔧 Toggle Debug Info
+                        </button>
+                        <div style="display: none;" class="mt-2 p-2 bg-light rounded">
+                            <small class="text-muted">
+                                <strong>Dados brutos (primeiros 5):</strong><br>
+                                <pre>${JSON.stringify(data.slice(0, 5), null, 2)}</pre>
+                            </small>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            document.getElementById('waveChart').innerHTML = chartHTML;
+            console.log('✅ Gráfico simples criado com sucesso!');
+        }
+
+        function showNoData() {
+            document.getElementById('waveChart').innerHTML = `
+                <div class="text-center p-5">
+                    <div class="mb-3">
+                        <i class="fas fa-chart-line fa-3x text-muted"></i>
+                    </div>
+                    <h5 class="text-muted">Nenhum dado encontrado</h5>
+                    <p class="text-muted">Para gerar dados de teste:</p>
+                    <ol class="text-start text-muted small">
+                        <li>Certifique-se que o <strong>Servidor TCP</strong> está rodando</li>
+                        <li>Execute a opção <strong>6 - Criar dados de teste</strong> no servidor</li>
+                        <li>Aguarde alguns segundos</li>
+                        <li>Recarregue esta página</li>
+                    </ol>
+                    <button class="btn btn-primary mt-2" onclick="loadAndDisplayChart()">
+                        <i class="fas fa-refresh"></i> Tentar Novamente
+                    </button>
+                </div>
+            `;
+        }
+
+        function showNoValidData() {
+            document.getElementById('waveChart').innerHTML = `
+                <div class="text-center p-5">
+                    <div class="mb-3">
+                        <i class="fas fa-exclamation-triangle fa-3x text-warning"></i>
+                    </div>
+                    <h5 class="text-warning">Dados sem valores numéricos</h5>
+                    <p class="text-muted">Os dados foram encontrados mas não contêm valores Hs, Hmax ou SST válidos.</p>
+                    <button class="btn btn-primary mt-2" onclick="loadAndDisplayChart()">
+                        <i class="fas fa-refresh"></i> Atualizar
+                    </button>
+                </div>
+            `;
+        }
+
+        function showError(message) {
+            document.getElementById('waveChart').innerHTML = `
+                <div class="text-center p-5">
+                    <div class="mb-3">
+                        <i class="fas fa-exclamation-circle fa-3x text-danger"></i>
+                    </div>
+                    <h5 class="text-danger">Erro ao carregar dados</h5>
+                    <div class="alert alert-danger text-start">
+                        ${message}
+                    </div>
+                    <button class="btn btn-primary mt-2" onclick="loadAndDisplayChart()">
+                        <i class="fas fa-refresh"></i> Tentar Novamente
+                    </button>
+                </div>
+            `;
+        }        
+        function showNoDataMessage() {
+            console.log('📊 Nenhum dado encontrado - exibindo orientações');
+            
+            document.getElementById('waveChart').innerHTML = `
+                <div class="text-center p-5">
+                    <div class="mb-4">
+                        <i class="fas fa-database fa-4x text-warning"></i>
+                    </div>
+                    <h4 class="text-warning mb-3">Nenhum Dado Encontrado</h4>
+                    <div class="alert alert-warning text-start">
+                        <h6><i class="fas fa-info-circle"></i> Para obter dados reais:</h6>
+                        <ol class="mb-0">
+                            <li>Certifique-se de que os sensores WAVY estão conectados e enviando dados</li>
+                            <li>Verifique se o Servidor TCP está rodando e recebendo dados</li>
+                            <li>Aguarde alguns minutos para que dados sejam coletados</li>
+                            <li>Use o menu do servidor para verificar se há dados na base</li>
+                        </ol>
+                    </div>
+                    <div class="d-flex justify-content-center gap-3 mt-3">
+                        <button class="btn btn-primary" onclick="loadAndDisplayChart()">
+                            <i class="fas fa-refresh"></i> Verificar Novamente
+                        </button>
+                        <a href="/Dashboard" class="btn btn-outline-secondary">
+                            <i class="fas fa-home"></i> Recarregar Dashboard
+                        </a>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function showNoValidDataMessage(recordCount) {
+            console.log('📊 Dados encontrados mas sem valores válidos - orientando para reprocessamento');
+            
+            document.getElementById('waveChart').innerHTML = `
+                <div class="text-center p-5">
+                    <div class="mb-4">
+                        <i class="fas fa-exclamation-triangle fa-4x text-info"></i>
+                    </div>
+                    <h4 class="text-info mb-3">Dados Encontrados Sem Valores</h4>
+                    <div class="alert alert-info text-start">
+                        <p><strong>Situação:</strong> Foram encontrados ${recordCount} registros na base de dados, mas todos os valores estão nulos.</p>
+                        <h6><i class="fas fa-tools"></i> Para extrair valores reais:</h6>
+                        <ol class="mb-0">
+                            <li><strong>Acesse o menu do Servidor TCP</strong></li>
+                            <li><strong>Use a opção "2 - Reprocessar dados existentes"</strong></li>
+                            <li>Isso irá extrair os valores numéricos do campo rawData</li>
+                            <li>Aguarde o processamento e depois atualize este dashboard</li>
+                        </ol>
+                    </div>
+                    <div class="alert alert-warning text-start">
+                        <strong><i class="fas fa-lightbulb"></i> Importante:</strong> 
+                        Este dashboard exibe APENAS dados reais extraídos dos sensores. 
+                        Não utilizamos dados simulados ou de demonstração.
+                    </div>
+                    <div class="d-flex justify-content-center gap-3 mt-3">
+                        <button class="btn btn-primary" onclick="loadAndDisplayChart()">
+                            <i class="fas fa-refresh"></i> Verificar Novamente
+                        </button>
+                        <a href="/Dashboard" class="btn btn-outline-secondary">
+                            <i class="fas fa-sync"></i> Recarregar Dashboard
+                        </a>
+                    </div>
+                </div>
+            `;
+        }        
+        function createRealDataChart(data) {
+            console.log('📊 Criando gráfico com dados reais validados...');
+            
+            // Filtrar apenas dados que têm pelo menos um valor válido
+            const validData = data.filter(d => 
+                (d.hs !== null && d.hs !== undefined) || 
+                (d.hmax !== null && d.hmax !== undefined) || 
+                (d.sst !== null && d.sst !== undefined) ||
+                (d.tp !== null && d.tp !== undefined) ||
+                (d.tz !== null && d.tz !== undefined)
+            );
+            
+            if (validData.length === 0) {
+                showNoValidDataMessage(data.length);
+                return;
+            }
+            
+            createAdvancedChart(validData);
+        }
+        
+        function createAdvancedChart(data) {            const chartContainer = document.getElementById('waveChart');
+            
+            let chartHTML = `
+
+            `;
+            
+            // Criar gráfico em Canvas usando JavaScript puro
+            chartHTML += `
+                <div class="row mb-3">
+                    <div class="col-12">
+                        <canvas id="oceanChart" width="800" height="200" style="width: 100%; max-height: 400px; border: 1px solid #ddd; border-radius: 8px;"></canvas>
+                    </div>
+                </div>
+            `;
+            
+            // Estatísticas
+            const hsValues = data.filter(d => d.hs !== null).map(d => d.hs);
+            const hmaxValues = data.filter(d => d.hmax !== null).map(d => d.hmax);
+            const sstValues = data.filter(d => d.sst !== null).map(d => d.sst);
+            
+            if (hsValues.length > 0 || hmaxValues.length > 0 || sstValues.length > 0) {
+                chartHTML += `<div class="row mb-3">`;
+                
+                if (hsValues.length > 0) {
+                    const hsAvg = (hsValues.reduce((a, b) => a + b, 0) / hsValues.length).toFixed(2);
+                    const hsMax = Math.max(...hsValues).toFixed(2);
+                    const hsMin = Math.min(...hsValues).toFixed(2);
+                    chartHTML += `
+                        <div class="col-md-4">
+                            <div class="card border-info">
+                                <div class="card-body text-center">
+                                    <h6 class="card-title text-info">📏 Hs (Altura Significativa)</h6>
+                                    <p class="card-text">
+                                        <strong>Média:</strong> ${hsAvg}m<br>
+                                        <strong>Variação:</strong> ${hsMin}m - ${hsMax}m<br>
+                                        <small class="text-muted">${hsValues.length} amostras</small>
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                if (hmaxValues.length > 0) {
+                    const hmaxAvg = (hmaxValues.reduce((a, b) => a + b, 0) / hmaxValues.length).toFixed(2);
+                    const hmaxMax = Math.max(...hmaxValues).toFixed(2);
+                    const hmaxMin = Math.min(...hmaxValues).toFixed(2);
+                    chartHTML += `
+                        <div class="col-md-4">
+                            <div class="card border-warning">
+                                <div class="card-body text-center">
+                                    <h6 class="card-title text-warning">📈 Hmax (Altura Máxima)</h6>
+                                    <p class="card-text">
+                                        <strong>Média:</strong> ${hmaxAvg}m<br>
+                                        <strong>Variação:</strong> ${hmaxMin}m - ${hmaxMax}m<br>
+                                        <small class="text-muted">${hmaxValues.length} amostras</small>
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                if (sstValues.length > 0) {
+                    const sstAvg = (sstValues.reduce((a, b) => a + b, 0) / sstValues.length).toFixed(1);
+                    const sstMax = Math.max(...sstValues).toFixed(1);
+                    const sstMin = Math.min(...sstValues).toFixed(1);
+                    chartHTML += `
+                        <div class="col-md-4">
+                            <div class="card border-success">
+                                <div class="card-body text-center">
+                                    <h6 class="card-title text-success">🌡️ SST (Temperatura)</h6>
+                                    <p class="card-text">
+                                        <strong>Média:</strong> ${sstAvg}°C<br>
+                                        <strong>Variação:</strong> ${sstMin}°C - ${sstMax}°C<br>
+                                        <small class="text-muted">${sstValues.length} amostras</small>
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                chartHTML += `</div>`;
+            }
+            
+            chartHTML += `</div>`;
+            
+            chartContainer.innerHTML = chartHTML;
+            
+            // Desenhar o gráfico no canvas
+            drawCanvasChart(data);
+            
+            console.log('✅ Gráfico avançado criado com sucesso!');
+        }
+        
+        function drawCanvasChart(data) {
+            const canvas = document.getElementById('oceanChart');
+            if (!canvas) return;
+            
+            const ctx = canvas.getContext('2d');
+            const width = canvas.width;
+            const height = canvas.height;
+            
+            // Limpar canvas
+            ctx.clearRect(0, 0, width, height);
+            
+            // Configurações
+            const margin = { top: 40, right: 60, bottom: 60, left: 60 };
+            const chartWidth = width - margin.left - margin.right;
+            const chartHeight = height - margin.top - margin.bottom;
+            
+            // Preparar dados
+            const validData = data.filter(d => d.hs !== null || d.hmax !== null || d.sst !== null);
+            if (validData.length === 0) return;
+            
+            // Escalas
+            const maxY = Math.max(
+                ...validData.map(d => Math.max(d.hs || 0, d.hmax || 0, (d.sst || 0) / 4))
+            );
+            const minY = 0;
+            
+            // Desenhar fundo
+            ctx.fillStyle = '#f8f9fa';
+            ctx.fillRect(margin.left, margin.top, chartWidth, chartHeight);
+            
+            // Desenhar grid
+            ctx.strokeStyle = '#e9ecef';
+            ctx.lineWidth = 1;
+            
+            // Grid horizontal
+            for (let i = 0; i <= 5; i++) {
+                const y = margin.top + (chartHeight / 5) * i;
+                ctx.beginPath();
+                ctx.moveTo(margin.left, y);
+                ctx.lineTo(margin.left + chartWidth, y);
+                ctx.stroke();
+            }
+            
+            // Grid vertical
+            for (let i = 0; i <= 10; i++) {
+                const x = margin.left + (chartWidth / 10) * i;
+                ctx.beginPath();
+                ctx.moveTo(x, margin.top);
+                ctx.lineTo(x, margin.top + chartHeight);
+                ctx.stroke();
+            }
+            
+            // Função para converter valor Y para pixel
+            const yToPixel = (value) => margin.top + chartHeight - ((value - minY) / (maxY - minY)) * chartHeight;
+            
+            // Desenhar linha Hs
+            const hsData = validData.filter(d => d.hs !== null);
+            if (hsData.length > 0) {
+                ctx.strokeStyle = '#3498db';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                
+                hsData.forEach((d, i) => {
+                    const x = margin.left + (chartWidth / (hsData.length - 1)) * i;
+                    const y = yToPixel(d.hs);
+                    
+                    if (i === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                });
+                ctx.stroke();
+                
+                // Pontos
+                ctx.fillStyle = '#3498db';
+                hsData.forEach((d, i) => {
+                    const x = margin.left + (chartWidth / (hsData.length - 1)) * i;
+                    const y = yToPixel(d.hs);
+                    ctx.beginPath();
+                    ctx.arc(x, y, 3, 0, 2 * Math.PI);
+                    ctx.fill();
+                });
+            }
+            
+            // Desenhar linha Hmax
+            const hmaxData = validData.filter(d => d.hmax !== null);
+            if (hmaxData.length > 0) {
+                ctx.strokeStyle = '#e74c3c';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                
+                hmaxData.forEach((d, i) => {
+                    const x = margin.left + (chartWidth / (hmaxData.length - 1)) * i;
+                    const y = yToPixel(d.hmax);
+                    
+                    if (i === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                });
+                ctx.stroke();
+                
+                // Pontos
+                ctx.fillStyle = '#e74c3c';
+                hmaxData.forEach((d, i) => {
+                    const x = margin.left + (chartWidth / (hmaxData.length - 1)) * i;
+                    const y = yToPixel(d.hmax);
+                    ctx.beginPath();
+                    ctx.arc(x, y, 3, 0, 2 * Math.PI);
+                    ctx.fill();
+                });
+            }
+            
+            // Labels dos eixos
+            ctx.fillStyle = '#495057';
+            ctx.font = '12px Arial';
+            ctx.textAlign = 'center';
+            
+            // Título
+            ctx.font = 'bold 16px Arial';
+            ctx.fillText('Altura das Ondas ao Longo do Tempo', width / 2, 25);
+            
+            // Legenda
+            ctx.font = '12px Arial';
+            ctx.textAlign = 'left';
+            
+            if (hsData.length > 0) {
+                ctx.fillStyle = '#3498db';
+                ctx.fillRect(width - 150, 50, 15, 2);
+                ctx.fillStyle = '#495057';
+                ctx.fillText('Hs (Altura Significativa)', width - 130, 55);
+            }
+            
+            if (hmaxData.length > 0) {
+                ctx.fillStyle = '#e74c3c';
+                ctx.fillRect(width - 150, 70, 15, 2);
+                ctx.fillStyle = '#495057';
+                ctx.fillText('Hmax (Altura Máxima)', width - 130, 75);
+            }
+        }
+    </script>
+}
