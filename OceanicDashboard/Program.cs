@@ -8,7 +8,12 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllersWithViews();
 
 // Configure Entity Framework
-var dbPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "SistemasDistribuidos-T1", "oceanic_data.db");
+var dbPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "oceanic_data.db");
+var dbDirectory = Path.GetDirectoryName(dbPath);
+if (!Directory.Exists(dbDirectory))
+{
+    Directory.CreateDirectory(dbDirectory);
+}
 builder.Services.AddDbContext<OceanicDataContext>(options =>
     options.UseSqlite($"Data Source={dbPath}"));
 
