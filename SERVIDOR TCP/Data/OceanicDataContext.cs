@@ -16,12 +16,13 @@ namespace SERVIDOR_TCP.Data
         public OceanicDataContext() : base()
         {
         }
-          protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+        
+        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
         {
             if (!optionsBuilder.IsConfigured)
             {
-                // Usar SQLite compartilhado entre SERVIDOR TCP e Dashboard
-                var dbPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "SistemasDistribuidos-T1", "oceanic_data.db");
+                // Usar SQLite com caminho relativo
+                var dbPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "oceanic_data.db");
                 optionsBuilder.UseSqlite($"Data Source={dbPath}");
             }
         }
