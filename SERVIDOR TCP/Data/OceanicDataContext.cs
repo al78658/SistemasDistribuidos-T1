@@ -21,7 +21,7 @@ namespace SERVIDOR_TCP.Data
             if (!optionsBuilder.IsConfigured)
             {
                 // Usar SQLite compartilhado entre SERVIDOR TCP e Dashboard
-                var dbPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "SistemasDistribuidos-T1", "oceanic_data.db");
+                var dbPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "oceanic_data.db");
                 optionsBuilder.UseSqlite($"Data Source={dbPath}");
             }
         }
